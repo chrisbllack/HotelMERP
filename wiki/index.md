@@ -8,6 +8,7 @@ or entity is added.
 - [Overview](overview.md) — what INFINEON is, who it serves, where it lives
 - [Team structure](team.md) — 10 parallel lanes that own the work
 - [Visual themes](themes.md) — the 7 switchable UI themes
+- [Grand Palm guest experience](grand-palm-guest-experience.md) — the rebrand of public surfaces to a luxury hospitality brand
 
 ## Modules (production scope)
 - Front Desk, Reservations, Housekeeping, Maintenance, POS, Inventory, Finance,

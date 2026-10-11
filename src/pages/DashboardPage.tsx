@@ -1,12 +1,15 @@
 import { Card, CardHeader, StatCard, Badge, Table, Td } from "../components/ui/primitives";
 import { PageHeader } from "../components/ui/primitives";
 import { usePlatform } from "../store/platform";
+import { useAuth } from "../auth/auth";
 import { guests, posOrders, posOrderLines, eventBookings, hardwareDevices, PROPERTY, rooms as seedRooms } from "../data/demo";
 import { naira, num, ROOM_STATUS, todayISO } from "../lib/utils";
+import { ROLE_LABELS } from "../types";
 import { Link } from "react-router-dom";
-import { AlertTriangle, ArrowRight, Radio } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bell, Building2, CalendarDays, Radio, Sun } from "lucide-react";
 
 export default function DashboardPage() {
+  const { user } = useAuth();
   const { rooms, reservations, tasks } = usePlatform();
 
   const inHouse = reservations.filter((r) => r.status === "checked_in");
@@ -31,12 +34,73 @@ export default function DashboardPage() {
     count: rooms.filter((r) => r.status === s).length,
   }));
 
+  const roleLabel = user ? ROLE_LABELS[user.role] : "Operator";
+  const firstName = user?.name?.split(" ")[0] ?? "there";
+  const today = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Executive Dashboard"
         subtitle={`${PROPERTY.name} · business date 5 Sep 2026 · all figures local, offline-capable`}
       />
+
+      {/* Welcome band */}
+      <section
+        className="relative overflow-hidden rounded-2xl border border-brand-800/70 bg-gradient-to-br from-brand-900/80 via-brand-900/40 to-brand-950/60 shadow-panel"
+        style={{
+          backgroundImage:
+            "linear-gradient(120deg, rgba(8,26,21,0.92) 0%, rgba(8,26,21,0.55) 60%, rgba(8,26,21,0.2) 100%), url(https://images.unsplash.com/photo-1600011689032-8b628b8a8747?ixlib=rb-4.1.0&auto=format&fit=crop&w=1800&q=80)",
+          backgroundSize: "cover",
+          backgroundPosition: "right center",
+        }}
+      >
+        <div className="relative grid gap-4 p-6 sm:p-8 lg:grid-cols-[1fr_auto]">
+          <div>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-gold-400/40 bg-black/35 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.2em] text-gold-200 backdrop-blur">
+              <Sun size={11} className="text-gold-300" /> {greeting()}
+            </span>
+            <h2 className="mt-3 font-display text-2xl text-brand-50 sm:text-3xl">
+              Good to see you, {firstName}.
+            </h2>
+            <p className="mt-1.5 max-w-2xl text-sm text-brand-100/75">
+              Here's how the property is performing today. <span className="text-brand-50/90">{arrivalsToday.length}</span> arrivals,
+              <span className="text-brand-50/90"> {departuresToday.length}</span> departures, and
+              <span className="text-brand-50/90"> {inHouse.length}</span> in-house guests — occupancy at
+              <span className="ml-1 inline-flex items-center rounded-md bg-gold-500/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-300">{occupancy}%</span>.
+            </p>
+            <div className="mt-5 flex flex-wrap items-center gap-2.5">
+              <Link
+                to="/front-desk"
+                className="flex items-center gap-1.5 rounded-md bg-gradient-to-r from-gold-400 to-gold-500 px-4 py-2 text-xs font-semibold text-brand-950 transition-all hover:from-gold-300 hover:to-gold-400"
+              >
+                Open front desk <ArrowRight size={13} />
+              </Link>
+              <Link
+                to="/rooms"
+                className="flex items-center gap-1.5 rounded-md border border-white/20 bg-white/5 px-4 py-2 text-xs font-medium text-brand-50 backdrop-blur transition-colors hover:bg-white/10"
+              >
+                <Building2 size={13} /> Room rack
+              </Link>
+              <span className="hidden items-center gap-1.5 rounded-md border border-brand-700/60 bg-brand-950/40 px-3 py-2 text-[11px] text-brand-200/70 sm:flex">
+                <CalendarDays size={12} className="text-gold-400" /> {today}
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-row gap-3 sm:flex-col sm:items-end">
+            <span className="inline-flex items-center gap-2 rounded-md border border-brand-700/60 bg-brand-950/40 px-3 py-2 text-[11px] text-brand-100/80 backdrop-blur">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse-dot" />
+              All systems nominal
+            </span>
+            <span className="inline-flex items-center gap-2 rounded-md border border-brand-700/60 bg-brand-950/40 px-3 py-2 text-[11px] text-brand-100/80 backdrop-blur">
+              <Bell size={11} className="text-gold-400" /> {deviceAlerts.length + pendingTasks} open attention items
+            </span>
+            <span className="inline-flex items-center gap-2 rounded-md border border-brand-700/60 bg-brand-950/40 px-3 py-2 text-[11px] text-brand-100/80 backdrop-blur">
+              {roleLabel}
+            </span>
+          </div>
+        </div>
+      </section>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Occupancy" value={`${occupancy}%`} sub={`${occupied} of ${sellable} sellable rooms`} accent="gold" />
@@ -175,4 +239,12 @@ export default function DashboardPage() {
       </Card>
     </div>
   );
+}
+
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 5) return "Good evening";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
 }

@@ -3,12 +3,20 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useAction } from "convex/react";
-import { AlertCircle, Loader2, Lock, ShieldCheck } from "lucide-react";
+import { AlertCircle, BedDouble, CalendarDays, Loader2, Lock, Mail, Phone, ShieldCheck, User } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { BookingShell } from "./BookingShell";
+import { BookingSteps } from "./BookingSteps";
 import { BOOKING_ENABLED, useEnsureSeeded } from "../../lib/booking-client";
 
 const COUNTRIES = ["Nigeria", "Ghana", "Kenya", "South Africa", "United Kingdom", "United States", "Other"];
+
+const ROOM_IMAGE: Record<string, string> = {
+  STD: "https://images.unsplash.com/photo-1771775529138-a7a20ba7e032?ixlib=rb-4.1.0&auto=format&fit=crop&w=800&q=80",
+  DLX: "https://images.unsplash.com/photo-1771775529138-a7a20ba7e032?ixlib=rb-4.1.0&auto=format&fit=crop&w=800&q=80",
+  EXE: "https://images.unsplash.com/photo-1777169794972-12095816073b?ixlib=rb-4.1.0&auto=format&fit=crop&w=800&q=80",
+  PRM: "https://images.unsplash.com/photo-1788927796219-35f6c27e6422?ixlib=rb-4.1.0&auto=format&fit=crop&w=800&q=80",
+};
 
 export default function GuestDetailsPage() {
   const [params] = useSearchParams();
@@ -76,7 +84,10 @@ export default function GuestDetailsPage() {
           <AlertCircle className="mx-auto text-amber-300" size={28} />
           <h1 className="mt-4 font-display text-2xl">Missing booking details</h1>
           <p className="mt-2 text-sm text-brand-200/60">Start again by choosing your dates and room.</p>
-          <Link to="/book" className="mt-6 inline-block rounded-lg bg-gold-500 px-5 py-2.5 text-sm font-semibold text-brand-950 hover:bg-gold-400">
+          <Link
+            to="/book"
+            className="mt-6 inline-block rounded-lg bg-gradient-to-r from-gold-400 to-gold-500 px-5 py-2.5 text-sm font-semibold text-brand-950 hover:from-gold-300 hover:to-gold-400"
+          >
             Back to search
           </Link>
         </div>
@@ -88,91 +99,146 @@ export default function GuestDetailsPage() {
 
   return (
     <BookingShell>
-      <section className="mx-auto grid max-w-4xl gap-8 px-5 py-12 lg:grid-cols-[1fr_340px]">
+      <BookingSteps
+        current="guests"
+        context={`checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&roomType=${roomType}`}
+      />
+
+      <section className="mx-auto grid max-w-5xl gap-8 px-5 py-10 lg:grid-cols-[1fr_360px]">
         {/* Form */}
         <div>
-          <h1 className="font-display text-2xl">Guest details</h1>
-          <p className="mt-1 text-sm text-brand-200/60">Almost there — tell us who's staying.</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-400/80">Step 3 of 4</p>
+          <h1 className="mt-2 font-display text-3xl text-brand-50 sm:text-4xl">Tell us about you.</h1>
+          <p className="mt-2 text-sm text-brand-100/70">
+            We'll use this for your booking confirmation and a pre-arrival note from the concierge.
+          </p>
 
           {error ? (
-            <div className="mt-5 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>
+            <div className="mt-5 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {error}
+            </div>
           ) : null}
 
           <form onSubmit={submit} className="mt-6 grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-1 block text-xs text-brand-200/70">First name *</span>
-              <input required value={form.firstName} onChange={set("firstName")}
-                className="w-full rounded-lg border border-brand-700 bg-brand-950/70 px-3 py-2.5 text-sm text-brand-50 outline-none focus:border-gold-500/60" />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-brand-200/70">Last name *</span>
-              <input required value={form.lastName} onChange={set("lastName")}
-                className="w-full rounded-lg border border-brand-700 bg-brand-950/70 px-3 py-2.5 text-sm text-brand-50 outline-none focus:border-gold-500/60" />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-brand-200/70">Email *</span>
-              <input required type="email" value={form.email} onChange={set("email")}
-                className="w-full rounded-lg border border-brand-700 bg-brand-950/70 px-3 py-2.5 text-sm text-brand-50 outline-none focus:border-gold-500/60" />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-brand-200/70">Phone *</span>
-              <input required value={form.phone} onChange={set("phone")} placeholder="+234…"
-                className="w-full rounded-lg border border-brand-700 bg-brand-950/70 px-3 py-2.5 text-sm text-brand-50 outline-none focus:border-gold-500/60" />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-brand-200/70">Country</span>
-              <select value={form.country} onChange={set("country")}
-                className="w-full rounded-lg border border-brand-700 bg-brand-950/70 px-3 py-2.5 text-sm text-brand-50 outline-none focus:border-gold-500/60">
-                {COUNTRIES.map((c) => <option key={c}>{c}</option>)}
+            <Field icon={<User size={13} />} label="First name *" value={form.firstName} onChange={set("firstName")} />
+            <Field icon={<User size={13} />} label="Last name *" value={form.lastName} onChange={set("lastName")} />
+            <Field icon={<Mail size={13} />} label="Email *" type="email" value={form.email} onChange={set("email")} />
+            <Field icon={<Phone size={13} />} label="Phone *" value={form.phone} onChange={set("phone")} placeholder="+234…" />
+
+            <label className="block sm:col-span-2">
+              <span className="mb-1 block text-xs text-brand-200/70">Country of residence</span>
+              <select
+                value={form.country}
+                onChange={set("country")}
+                className="w-full rounded-lg border border-brand-700 bg-brand-950/70 px-3 py-2.5 text-sm text-brand-50 outline-none focus:border-gold-500/60"
+              >
+                {COUNTRIES.map((c) => <option key={c} className="bg-brand-950 text-brand-50">{c}</option>)}
               </select>
             </label>
+
             <label className="block sm:col-span-2">
               <span className="mb-1 block text-xs text-brand-200/70">Special requests</span>
-              <textarea rows={3} value={form.specialRequests} onChange={set("specialRequests")}
-                placeholder="Airport pickup, high floor, dietary needs…"
-                className="w-full resize-none rounded-lg border border-brand-700 bg-brand-950/70 px-3 py-2.5 text-sm text-brand-50 outline-none focus:border-gold-500/60" />
+              <textarea
+                rows={3}
+                value={form.specialRequests}
+                onChange={set("specialRequests")}
+                placeholder="Airport pickup, high floor, dietary needs, late arrival…"
+                className="w-full resize-none rounded-lg border border-brand-700 bg-brand-950/70 px-3 py-2.5 text-sm text-brand-50 outline-none focus:border-gold-500/60"
+              />
+              <span className="mt-1 block text-[10px] text-brand-200/45">
+                We'll do our best to honour these — final confirmation arrives by email.
+              </span>
             </label>
 
             <button
-              type="submit" disabled={busy}
-              className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-gold-500 to-gold-600 px-6 py-3 text-sm font-semibold text-brand-950 transition hover:from-gold-400 hover:to-gold-500 disabled:opacity-60 sm:col-span-2"
+              type="submit"
+              disabled={busy}
+              className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-gold-400 to-gold-500 px-6 py-3.5 text-sm font-semibold text-brand-950 transition hover:from-gold-300 hover:to-gold-400 disabled:opacity-60 sm:col-span-2"
             >
-              {phase === "creating" ? <><Loader2 size={16} className="animate-spin" /> Creating your booking…</> : phase === "paying" ? <><Loader2 size={16} className="animate-spin" /> Opening secure payment…</> : <><Lock size={15} /> Confirm & pay deposit</>}
+              {phase === "creating" ? (
+                <><Loader2 size={16} className="animate-spin" /> Creating your booking…</>
+              ) : phase === "paying" ? (
+                <><Loader2 size={16} className="animate-spin" /> Opening secure payment…</>
+              ) : (
+                <><Lock size={15} /> Confirm &amp; pay deposit</>
+              )}
             </button>
-            <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-brand-200/50 sm:col-span-2">
+            <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-brand-200/55 sm:col-span-2">
               <ShieldCheck size={13} className="text-gold-400" />
-              Deposit charged securely. Balance settles at the front desk on arrival.
+              Deposit charged securely via Paystack. Balance settles at the front desk on arrival.
             </p>
           </form>
         </div>
 
         {/* Summary rail */}
-        <aside className="h-fit rounded-2xl border border-gold-500/25 bg-brand-900/60 p-6 shadow-panel lg:sticky lg:top-24">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-gold-500/80">Your stay</p>
-          <p className="mt-3 font-display text-lg">{roomTypeLabel(roomType)}</p>
-          <dl className="mt-4 space-y-2.5 text-sm">
-            <Row k="Check-in" v={checkIn} />
-            <Row k="Check-out" v={checkOut} />
-            <Row k="Nights" v={String(nights)} />
-            <Row k="Guests" v={`${adults} adult${adults > 1 ? "s" : ""}`} />
-          </dl>
-          <div className="mt-5 border-t border-brand-800/70 pt-4 text-sm">
-            <Row k="Deposit due now" v="20% at checkout" />
-            <Row k="Balance" v="Due at the hotel" />
+        <aside className="h-fit overflow-hidden rounded-2xl border border-brand-800/70 bg-brand-900/50 shadow-panel lg:sticky lg:top-24">
+          <div className="relative h-32 overflow-hidden">
+            <img
+              src={ROOM_IMAGE[roomType] ?? ROOM_IMAGE.STD}
+              alt={roomTypeLabel(roomType)}
+              className="h-full w-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+            <div className="absolute bottom-0 left-0 p-4">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-gold-300">Your room</p>
+              <p className="font-display text-lg text-white">{roomTypeLabel(roomType)}</p>
+            </div>
           </div>
-          <p className="mt-4 text-[11px] leading-relaxed text-brand-200/50">
-            Free cancellation until 48 hours before arrival. Payment methods: card, bank transfer, USSD — or pay the full amount at the front desk.
-          </p>
+          <div className="p-5">
+            <dl className="space-y-3 text-sm">
+              <Row icon={<CalendarDays size={13} />} k="Check-in" v={fmtDate(checkIn)} />
+              <Row icon={<CalendarDays size={13} />} k="Check-out" v={fmtDate(checkOut)} />
+              <Row icon={<BedDouble size={13} />} k="Nights" v={String(nights)} />
+              <Row icon={<User size={13} />} k="Guests" v={`${adults} adult${adults > 1 ? "s" : ""}`} />
+            </dl>
+            <div className="my-4 border-t border-brand-800/70" />
+            <dl className="space-y-3 text-sm">
+              <Row k="Deposit due now" v="20% at checkout" />
+              <Row k="Balance" v="Due at the hotel" />
+            </dl>
+            <div className="mt-5 rounded-lg border border-gold-500/30 bg-gold-500/5 p-3 text-[11px] leading-relaxed text-brand-100/75">
+              <p className="font-medium text-gold-200">Free cancellation</p>
+              <p className="mt-0.5">Cancel up to 48 hours before arrival for a full refund of your deposit.</p>
+            </div>
+          </div>
         </aside>
       </section>
     </BookingShell>
   );
 }
 
-function Row({ k, v }: { k: string; v: string }) {
+function Field({
+  icon, label, value, onChange, type = "text", placeholder,
+}: {
+  icon: React.ReactNode; label: string; value: string;
+  onChange: (e: { target: { value: string } }) => void;
+  type?: string; placeholder?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 flex items-center gap-1.5 text-xs text-brand-200/70">
+        <span className="text-gold-400">{icon}</span>
+        {label}
+      </span>
+      <input
+        required
+        type={type}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-brand-700 bg-brand-950/70 px-3 py-2.5 text-sm text-brand-50 outline-none transition-colors focus:border-gold-500/60"
+      />
+    </label>
+  );
+}
+
+function Row({ icon, k, v }: { icon?: React.ReactNode; k: string; v: string }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <dt className="text-brand-200/60">{k}</dt>
+      <dt className="flex items-center gap-1.5 text-brand-200/65">
+        {icon ? <span className="text-gold-400">{icon}</span> : null}
+        {k}
+      </dt>
       <dd className="text-right font-medium text-brand-50">{v}</dd>
     </div>
   );
@@ -183,6 +249,12 @@ function roomTypeLabel(code: string): string {
     STD: "Standard Room", DLX: "Deluxe Room", EXE: "Executive Suite", PRM: "Presidential Suite",
   };
   return map[code] ?? code;
+}
+
+function fmtDate(iso: string): string {
+  const t = Date.parse(`${iso}T00:00:00Z`);
+  if (Number.isNaN(t)) return iso;
+  return new Date(t).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
 function nightsBetween(a: string, b: string): number {
