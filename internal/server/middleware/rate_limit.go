@@ -7,52 +7,104 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"infineon/internal/api"
 )
 
-type ipLimitEntry struct {
-	Count       int
-	WindowStart time.Time
-	BlockedTill time.Time
+type rateLimitEntry struct {
+	windowStart time.Time
+	count       int
 }
 
 type IPRateLimiter struct {
-	mu          sync.Mutex
-	entries     map[string]ipLimitEntry
-	limit       int
-	window      time.Duration
-	block       time.Duration
-	maxEntries  int
+	mu              sync.Mutex
+	entries         map[string]rateLimitEntry
+	limit           int
+	window          time.Duration
+	maxEntries      int
+	cleanupInterval time.Duration
+	lastCleanup     time.Time
 }
 
 func NewIPRateLimiter(
 	limit int,
 	window time.Duration,
-	block time.Duration,
 ) *IPRateLimiter {
+	if limit < 1 {
+		limit = 10
+	}
+
+	if window <= 0 {
+		window = time.Minute
+	}
+
 	return &IPRateLimiter{
-		entries:    make(map[string]ipLimitEntry),
-		limit:      limit,
-		window:     window,
-		block:      block,
-		maxEntries: 10000,
+		entries:         make(map[string]rateLimitEntry),
+		limit:           limit,
+		window:          window,
+		maxEntries:      10000,
+		cleanupInterval: 5 * time.Minute,
+		lastCleanup:     time.Now(),
 	}
 }
 
-func (l *IPRateLimiter) Middleware(next http.Handler) http.Handler {
+func (l *IPRateLimiter) Allow(ip string, now time.Time) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if now.Sub(l.lastCleanup) >= l.cleanupInterval {
+		for key, entry := range l.entries {
+			if now.Sub(entry.windowStart) >= l.window {
+				delete(l.entries, key)
+			}
+		}
+		l.lastCleanup = now
+	}
+
+	if len(l.entries) >= l.maxEntries {
+		return false, l.window
+	}
+
+	entry, exists := l.entries[ip]
+	if !exists || now.Sub(entry.windowStart) >= l.window {
+		l.entries[ip] = rateLimitEntry{
+			windowStart: now,
+			count:       1,
+		}
+		return true, 0
+	}
+
+	if entry.count >= l.limit {
+		retryAfter := l.window - now.Sub(entry.windowStart)
+		if retryAfter < time.Second {
+			retryAfter = time.Second
+		}
+		return false, retryAfter
+	}
+
+	entry.count++
+	l.entries[ip] = entry
+	return true, 0
+}
+
+func LoginRateLimit(
+	limiter *IPRateLimiter,
+	next http.Handler,
+) http.Handler {
+	if limiter == nil {
+		limiter = NewIPRateLimiter(10, time.Minute)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
-
-		if !l.allow(ip) {
-			w.Header().Set("Retry-After", strconv.Itoa(int(l.block.Seconds())))
-			api.WriteError(
+		allowed, retryAfter := limiter.Allow(ip, time.Now().UTC())
+		if !allowed {
+			w.Header().Set(
+				"Retry-After",
+				strconv.Itoa(int(retryAfter.Round(time.Second)/time.Second)),
+			)
+			http.Error(
 				w,
-				r,
+				http.StatusText(http.StatusTooManyRequests),
 				http.StatusTooManyRequests,
-				"rate_limited",
-				"Too many login attempts. Try again later.",
-				nil,
 			)
 			return
 		}
@@ -61,61 +113,15 @@ func (l *IPRateLimiter) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-func (l *IPRateLimiter) allow(ip string) bool {
-	now := time.Now()
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if len(l.entries) >= l.maxEntries {
-		for key, entry := range l.entries {
-			if now.Sub(entry.WindowStart) > l.window &&
-				now.After(entry.BlockedTill) {
-				delete(l.entries, key)
-			}
-		}
-	}
-
-	entry, exists := l.entries[ip]
-	if !exists || now.Sub(entry.WindowStart) >= l.window {
-		l.entries[ip] = ipLimitEntry{
-			Count:       1,
-			WindowStart: now,
-		}
-		return true
-	}
-
-	if now.Before(entry.BlockedTill) {
-		return false
-	}
-
-	entry.Count++
-	if entry.Count > l.limit {
-		entry.BlockedTill = now.Add(l.block)
-		l.entries[ip] = entry
-		return false
-	}
-
-	l.entries[ip] = entry
-	return true
-}
-
 func clientIP(r *http.Request) string {
-	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
-		if host, _, err := net.SplitHostPort(forwarded); err == nil {
-			return host
-		}
-		return strings.TrimSpace(strings.Split(forwarded, ",")[0])
-	}
-
-	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
-		return realIP
-	}
-
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil && host != "" {
 		return host
 	}
 
-	return r.RemoteAddr
+	if r.RemoteAddr != "" {
+		return r.RemoteAddr
+	}
+
+	return "unknown"
 }
