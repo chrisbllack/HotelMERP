@@ -34,6 +34,9 @@ import GuestDetailsPage from "./pages/booking/GuestDetailsPage";
 import ConfirmationPage from "./pages/booking/ConfirmationPage";
 import BookingLookupPage from "./pages/booking/BookingLookupPage";
 
+// Operator marketing site (B2B)
+import PlatformPage from "./pages/platform/PlatformPage";
+
 const protectedRoutes: Array<[string, ComponentType]> = [
   ["/dashboard", DashboardPage],
   ["/front-desk", FrontDeskPage],
@@ -65,6 +68,7 @@ export default function App() {
           <Routes>
             {/* Public product surfaces */}
             <Route path="/" element={<LandingPage />} />
+            <Route path="/platform" element={<PlatformPage />} />
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/book" element={<BookPage />} />
             <Route path="/book/guests" element={<GuestDetailsPage />} />

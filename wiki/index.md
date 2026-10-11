@@ -9,6 +9,7 @@ or entity is added.
 - [Team structure](team.md) — 10 parallel lanes that own the work
 - [Visual themes](themes.md) — the 7 switchable UI themes
 - [Grand Palm guest experience](grand-palm-guest-experience.md) — the rebrand of public surfaces to a luxury hospitality brand
+- [Platform marketing site](platform-marketing-site.md) — the B2B operator surface at /platform (21 modules, pricing, ecosystem)
 
 ## Modules (production scope)
 - Front Desk, Reservations, Housekeeping, Maintenance, POS, Inventory, Finance,

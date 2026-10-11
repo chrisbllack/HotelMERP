@@ -10,3 +10,9 @@
 ## [2026-10-11T10:56:15Z] fix | Replaced broken <dl>/<div> mismatch in GuestDetailsPage summary rail
 ## [2026-10-11T10:56:30Z] fix | Moved ROLE_LABELS import from utils to types in DashboardPage
 ## [2026-10-11T10:58:00Z] doc | Wrote wiki/grand-palm-guest-experience.md and updated wiki/index.md to point at it
+## [2026-10-11T10:30:00Z] research | Studied cloudhotelerp.com, hotel-management-software.html, brochure.html, djubo.com (homepage, /products, /pricing), and yanolja.com for patterns
+## [2026-10-11T10:35:00Z] design | Built /platform (PlatformPage) — hero with 21-modules social proof, suite filter chips, 21 module cards, ecosystem diagram, integrations, comparison table, testimonials, 3-tier pricing, FAQ, final CTA
+## [2026-10-11T10:36:00Z] route | Added /platform public route in App.tsx and "Run your hotel on this →" nav badge in LandingPage to drive operators
+## [2026-10-11T10:37:00Z] fix | Added Demand & Forecasting as 4th Intelligence module so suite counts match headline "21 modules"
+## [2026-10-11T10:38:00Z] polish | Strengthened hero gradient on /platform for gold-on-image contrast
+## [2026-10-11T10:39:00Z] doc | Wrote wiki/platform-marketing-site.md and added it to wiki/index.md

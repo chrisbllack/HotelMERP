@@ -135,6 +135,9 @@ export default function LandingPage() {
             <a href="#wellness" className="transition-colors hover:text-gold-300">Wellness</a>
             <a href="#experiences" className="transition-colors hover:text-gold-300">Experiences</a>
             <a href="#location" className="transition-colors hover:text-gold-300">Location</a>
+            <Link to="/platform" className="rounded-full border border-gold-400/40 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-gold-200 transition-colors hover:bg-gold-500/10">
+              Run your hotel on this →
+            </Link>
           </nav>
           <div className="flex items-center gap-3">
             <a
