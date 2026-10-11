@@ -1,7 +1,15 @@
 @import "tailwindcss";
 
+/* =========================================================================
+   THEME SYSTEM — 7 switchable hospitality themes
+   --------------------------------------------------------------------------
+   Each theme is selected via the [data-theme="..."] attribute on <html>.
+   Components throughout the app reference the brand/gold CSS variables,
+   so swapping the data-theme attribute retunes the whole UI instantly.
+   ========================================================================= */
+
 @theme {
-  /* Brand: deep rainforest emerald — African luxury hospitality */
+  /* Default = Emerald Gold (African luxury) */
   --color-brand-50: #ecf6f1;
   --color-brand-100: #d3eae0;
   --color-brand-200: #a8d4c2;
@@ -14,7 +22,6 @@
   --color-brand-900: #102e27;
   --color-brand-950: #081a15;
 
-  /* Accent: brass gold */
   --color-gold-300: #e8cd7a;
   --color-gold-400: #d9b54c;
   --color-gold-500: #c9a227;
@@ -27,6 +34,182 @@
   --shadow-panel: 0 1px 0 0 rgb(255 255 255 / 0.04), 0 8px 24px -12px rgb(0 0 0 / 0.6);
 }
 
+/* Theme 1: Emerald Gold (default — African luxury / Grand Palm signature) */
+:root,
+[data-theme="emerald-gold"] {
+  --color-brand-50: #ecf6f1;
+  --color-brand-100: #d3eae0;
+  --color-brand-200: #a8d4c2;
+  --color-brand-300: #74b69c;
+  --color-brand-400: #47937a;
+  --color-brand-500: #2c765f;
+  --color-brand-600: #1f5d4b;
+  --color-brand-700: #194a3d;
+  --color-brand-800: #143a30;
+  --color-brand-900: #102e27;
+  --color-brand-950: #081a15;
+
+  --color-gold-300: #e8cd7a;
+  --color-gold-400: #d9b54c;
+  --color-gold-500: #c9a227;
+  --color-gold-600: #a5831d;
+
+  --color-ink: #071310;
+  --font-display: Georgia, "Times New Roman", serif;
+  --radius-mode: 0.75rem;
+  --shadow-panel: 0 1px 0 0 rgb(255 255 255 / 0.04), 0 8px 24px -12px rgb(0 0 0 / 0.6);
+}
+
+/* Theme 2: Midnight Sapphire (US luxury — Four Seasons, Park Hyatt) */
+[data-theme="midnight-sapphire"] {
+  --color-brand-50: #e8edf6;
+  --color-brand-100: #c5d0e3;
+  --color-brand-200: #95aaca;
+  --color-brand-300: #6c84c7;
+  --color-brand-400: #4d63a3;
+  --color-brand-500: #324a85;
+  --color-brand-600: #25396b;
+  --color-brand-700: #1a2a55;
+  --color-brand-800: #101c3d;
+  --color-brand-900: #0a1226;
+  --color-brand-950: #050816;
+
+  --color-gold-300: #e3e8f3;
+  --color-gold-400: #c0c9db;
+  --color-gold-500: #8d9bbd;
+  --color-gold-600: #6c7da3;
+
+  --color-ink: #030611;
+  --font-display: "Didot", "Bodoni 72", Georgia, serif;
+  --radius-mode: 0.5rem;
+  --shadow-panel: 0 1px 0 0 rgb(255 255 255 / 0.05), 0 12px 32px -16px rgb(0 0 0 / 0.7);
+}
+
+/* Theme 3: Saffron Royale (India — Taj, Oberoi) */
+[data-theme="saffron-royale"] {
+  --color-brand-50: #fdf0e7;
+  --color-brand-100: #f7dcc4;
+  --color-brand-200: #eebf99;
+  --color-brand-300: #d4977a;
+  --color-brand-400: #b06a4a;
+  --color-brand-500: #8a4a2e;
+  --color-brand-600: #6e3823;
+  --color-brand-700: #5c2b1a;
+  --color-brand-800: #3d1a10;
+  --color-brand-900: #280f08;
+  --color-brand-950: #1a0a0a;
+
+  --color-gold-300: #e8c468;
+  --color-gold-400: #d4a017;
+  --color-gold-500: #b8860b;
+  --color-gold-600: #8a6508;
+
+  --color-ink: #1a0a0a;
+  --font-display: "Optima", "Palatino Linotype", Georgia, serif;
+  --radius-mode: 0.375rem;
+  --shadow-panel: 0 1px 0 0 rgb(255 200 120 / 0.08), 0 8px 24px -10px rgb(80 30 0 / 0.5);
+}
+
+/* Theme 4: Lagoon Pearl (Nigeria coastal — Eko Hotel, Atlantic) */
+[data-theme="lagoon-pearl"] {
+  --color-brand-50: #e3f4f7;
+  --color-brand-100: #c2e6ed;
+  --color-brand-200: #9bd4de;
+  --color-brand-300: #6cc4d4;
+  --color-brand-400: #3ea7bb;
+  --color-brand-500: #2a8a9e;
+  --color-brand-600: #1f6e80;
+  --color-brand-700: #155e6f;
+  --color-brand-800: #0e4452;
+  --color-brand-900: #082d37;
+  --color-brand-950: #051e26;
+
+  --color-gold-300: #f0e2c8;
+  --color-gold-400: #e6d2b0;
+  --color-gold-500: #d4b896;
+  --color-gold-600: #a89476;
+
+  --color-ink: #031318;
+  --font-display: "Avenir Next", "Futura", Georgia, serif;
+  --radius-mode: 1rem;
+  --shadow-panel: 0 1px 0 0 rgb(255 255 255 / 0.06), 0 10px 28px -14px rgb(0 60 80 / 0.6);
+}
+
+/* Theme 5: Jade Imperial (China — Mandarin Oriental, Peninsula) */
+[data-theme="jade-imperial"] {
+  --color-brand-50: #e3f0e8;
+  --color-brand-100: #c4dfce;
+  --color-brand-200: #9ec8af;
+  --color-brand-300: #7ec09e;
+  --color-brand-400: #57a37e;
+  --color-brand-500: #3c8463;
+  --color-brand-600: #2b6b4d;
+  --color-brand-700: #1f4d3a;
+  --color-brand-800: #14382a;
+  --color-brand-900: #0d1a14;
+  --color-brand-950: #050d09;
+
+  --color-gold-300: #e88580;
+  --color-gold-400: #d65a55;
+  --color-gold-500: #c4302b;
+  --color-gold-600: #9a2220;
+
+  --color-ink: #0a1a10;
+  --font-display: "Songti SC", "STSong", "PingFang SC", Georgia, serif;
+  --radius-mode: 0.25rem;
+  --shadow-panel: 0 1px 0 0 rgb(255 80 80 / 0.06), 0 12px 28px -14px rgb(0 30 10 / 0.7);
+}
+
+/* Theme 6: Obsidian Noir (modern dark — W Hotel, Ace) */
+[data-theme="obsidian-noir"] {
+  --color-brand-50: #f5f5f5;
+  --color-brand-100: #d8d8d8;
+  --color-brand-200: #b0b0b0;
+  --color-brand-300: #888888;
+  --color-brand-400: #5e5e5e;
+  --color-brand-500: #404040;
+  --color-brand-600: #2a2a2a;
+  --color-brand-700: #1f1f1f;
+  --color-brand-800: #141414;
+  --color-brand-900: #0a0a0a;
+  --color-brand-950: #000000;
+
+  --color-gold-300: #66e3ff;
+  --color-gold-400: #33d8ff;
+  --color-gold-500: #00d4ff;
+  --color-gold-600: #00a8cc;
+
+  --color-ink: #000000;
+  --font-display: "Helvetica Neue", "Inter", system-ui, sans-serif;
+  --radius-mode: 0.125rem;
+  --shadow-panel: 0 0 0 1px rgb(0 212 255 / 0.08), 0 16px 32px -16px rgb(0 0 0 / 0.8);
+}
+
+/* Theme 7: Coral Sunset (boutique resort — tropical, Bawah Island) */
+[data-theme="coral-sunset"] {
+  --color-brand-50: #fff0ed;
+  --color-brand-100: #ffd9cf;
+  --color-brand-200: #fbb8a8;
+  --color-brand-300: #f0a89e;
+  --color-brand-400: #e08578;
+  --color-brand-500: #c46455;
+  --color-brand-600: #a14838;
+  --color-brand-700: #82323a;
+  --color-brand-800: #5a2126;
+  --color-brand-900: #3d1517;
+  --color-brand-950: #2a0e10;
+
+  --color-gold-300: #f8c99a;
+  --color-gold-400: #f0b582;
+  --color-gold-500: #e89a5f;
+  --color-gold-600: #c47840;
+
+  --color-ink: #2a0e10;
+  --font-display: "Avenir", "Century Gothic", Georgia, serif;
+  --radius-mode: 1.5rem;
+  --shadow-panel: 0 1px 0 0 rgb(255 255 255 / 0.1), 0 10px 32px -14px rgb(120 40 20 / 0.5);
+}
+
 html,
 body,
 #root {
@@ -35,7 +218,7 @@ body,
 
 body {
   background-color: var(--color-brand-950);
-  color: #e7efe9;
+  color: var(--color-brand-50);
   font-family:
     ui-sans-serif,
     system-ui,
@@ -46,6 +229,7 @@ body {
     Arial,
     sans-serif;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.4s ease, color 0.4s ease;
 }
 
 ::selection {
@@ -92,4 +276,108 @@ body {
 }
 .animate-pulse-dot {
   animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-brand-900) 0%,
+    var(--color-brand-800) 50%,
+    var(--color-brand-900) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+
+/* Hero sunrise bar — a soft gradient that warms from the gold accent
+   through to the brand mid tone, used as a CSS-only "horizon" line. */
+@keyframes sunrise-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+.animate-sunrise {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-brand-700) 18%,
+    var(--color-gold-500) 50%,
+    var(--color-brand-700) 82%,
+    transparent 100%
+  );
+  background-size: 220% 100%;
+  animation: sunrise-shift 12s ease-in-out infinite;
+}
+
+/* Primary CTA — subtle hover lift + gold glow. */
+.cta-glow {
+  transition: transform 220ms ease, box-shadow 220ms ease, background 220ms ease;
+}
+.cta-glow:hover {
+  transform: translateY(-1px) scale(1.025);
+  box-shadow:
+    0 0 0 1px var(--color-gold-400),
+    0 12px 28px -10px var(--color-gold-500);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cta-glow:hover {
+    transform: none;
+  }
+}
+
+/* Confirmation check — scales in with a soft ring. */
+@keyframes check-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.animate-check-pop {
+  animation: check-pop 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Theme-aware focus ring for accessibility */
+:focus-visible {
+  outline: 2px solid var(--color-gold-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-mode);
+}
+
+/* Skip link for keyboard users */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 8px;
+  z-index: 100;
+  background: var(--color-gold-500);
+  color: var(--color-brand-950);
+  padding: 8px 16px;
+  border-radius: var(--radius-mode);
+  font-weight: 600;
+}
+.skip-link:focus {
+  top: 8px;
 }

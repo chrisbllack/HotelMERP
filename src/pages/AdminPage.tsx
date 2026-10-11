@@ -2,7 +2,9 @@ import { Card, CardHeader, Badge, Table, Td, StatCard } from "../components/ui/p
 import { PageHeader } from "../components/ui/primitives";
 import { auditLog, systemSettings, users } from "../data/demo";
 import { ROLE_LABELS } from "../types";
-import { Settings, ShieldCheck, UserCog } from "lucide-react";
+import { Settings, ShieldCheck, UserCog, Palette } from "lucide-react";
+import { ThemeSwitcher } from "../components/ThemeSwitcher";
+import { useTheme } from "../store/theme";
 
 const ROLE_SCOPE: Record<string, string> = {
   admin: "All modules · user & system management · licensing",
@@ -25,11 +27,18 @@ const LICENSING = [
 ];
 
 export default function AdminPage() {
+  const { meta } = useTheme();
   return (
     <div className="space-y-6">
       <PageHeader
         title="System Administration"
         subtitle="M-PLT · users & roles, property settings, licensing and the platform audit surface"
+        actions={
+          <span className="flex items-center gap-2 rounded-full border border-brand-800/70 bg-brand-900/60 px-3 py-1.5 text-xs text-brand-200">
+            <Palette size={12} className="text-gold-400" />
+            Active theme: <span className="font-medium text-gold-300">{meta.name}</span>
+          </span>
+        }
       />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -98,6 +107,16 @@ export default function AdminPage() {
           </Card>
         </div>
       </div>
+
+      <Card>
+        <CardHeader
+          title="Visual Theme"
+          subtitle="Pick a palette that matches the property's positioning — changes apply everywhere instantly"
+        />
+        <div className="p-5">
+          <ThemeSwitcher />
+        </div>
+      </Card>
     </div>
   );
 }

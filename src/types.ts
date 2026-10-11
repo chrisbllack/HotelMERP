@@ -379,6 +379,9 @@ export interface InventoryProduct {
   unit: string;
   costPrice: number;
   reorderLevel: number;
+  valuationMethod?: ValuationMethod;
+  storeStock?: StoreStockLevel[];
+  batches?: ProductBatch[];
 }
 
 export interface StockLevel {
@@ -919,6 +922,10 @@ export interface SupplyChainProduct {
   totalQuantity: number;
   totalValue: number;
   status: "healthy" | "low_stock" | "critical";
+  valuationMethod?: ValuationMethod;
+  storeStock?: StoreStockLevel[];
+  batches?: ProductBatch[];
+  bookValue?: number;
 }
 
 export interface RequisitionItem {
@@ -996,6 +1003,8 @@ export interface StocktakeAuditRecord {
   storeName: string;
   auditDate: string;
   auditorName: string;
+  countedBy?: string;
+  variance?: number;
   categoriesAudited: string[];
   totalSkusCounted: number;
   totalSystemValue: number;
@@ -1003,7 +1012,7 @@ export interface StocktakeAuditRecord {
   varianceValue: number;
   variancePct: number;
   discrepanciesCount: number;
-  status: "in_progress" | "reconciled" | "posted_adjustment";
+  status: "in_progress" | "submitted" | "approved" | "rejected" | "reconciled" | "posted_adjustment";
   itemsSample: Array<{
     sku: string;
     name: string;
@@ -1014,6 +1023,73 @@ export interface StocktakeAuditRecord {
     varianceCost: number;
     reason?: string;
   }>;
+  lines?: Array<{
+    productId: string;
+    name: string;
+    expected: number;
+    counted: number;
+    variance: number;
+    unitCost: number;
+  }>;
+}
+
+// ----------------- Inventory Depth Extensions (Multi-Store, Batches, Valuation) -----------------
+export type ValuationMethod = "FIFO" | "LIFO" | "WeightedAvg" | "Standard";
+export type StoreLocation =
+  | "main"
+  | "fnb"
+  | "engineering"
+  | "housekeeping"
+  | "spa"
+  | "minibar";
+
+export interface StoreStockLevel {
+  storeId: string;
+  productId: string;
+  onHand: number;
+  reserved: number;
+  available: number;
+  reorderPoint: number;
+  parLevel: number;
+  minLevel: number;
+  maxLevel: number;
+  lastCountedAt: string;
+}
+
+export interface ProductBatch {
+  id: string;
+  productId: string;
+  batchNumber: string;
+  expiryDate: string;
+  manufactureDate: string;
+  supplierId: string;
+  quantityReceived: number;
+  quantityRemaining: number;
+  costPerUnit: number;
+  grnId?: string;
+  location: StoreLocation;
+}
+
+export interface SupplierScorecard {
+  supplierId: string;
+  supplierName: string;
+  onTimeDeliveryPct: number;
+  qualityRejectPct: number;
+  avgLeadTimeDays: number;
+  totalSpendLast90Days: number;
+  rating: "A+" | "A" | "B" | "C";
+}
+
+export interface ReorderAlert {
+  productId: string;
+  productName: string;
+  storeId: string;
+  storeName: string;
+  currentLevel: number;
+  reorderPoint: number;
+  suggestedOrderQty: number;
+  urgency: "low" | "medium" | "high" | "critical";
+  leadTimeDays: number;
 }
 
 // ---------------------------------------------------------------------------

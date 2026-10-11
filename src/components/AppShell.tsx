@@ -9,6 +9,7 @@ import { useAuth } from "../auth/auth";
 import { PROPERTY } from "../data/demo";
 import { ROLE_LABELS } from "../types";
 import { cn } from "../lib/utils";
+import { ThemeSwitcher } from "./ThemeSwitcher";
 
 interface NavItem {
   label: string;
@@ -192,6 +193,13 @@ export function AppShell() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <div
+              className="hidden items-center gap-2 rounded-lg border border-brand-800/80 bg-brand-900/50 px-3 py-1.5 md:flex"
+              title="Active theme"
+            >
+              <span className="text-[10px] uppercase tracking-wider text-brand-200/60">Theme</span>
+              <ThemeSwitcher variant="strip" />
+            </div>
             <button className="relative rounded-lg p-2 text-brand-200/70 hover:bg-brand-900/60 hover:text-brand-50" aria-label="Notifications">
               <Bell size={17} />
               <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-gold-400" />
