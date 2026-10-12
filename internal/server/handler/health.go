@@ -1,10 +1,9 @@
 package handler
 
 import (
-	"context"
 	"net/http"
 
-	"infineon/internal/response"
+	"infin eon/internal/response"
 )
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
@@ -12,13 +11,9 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 		response.RespondError(w, "Database not configured", http.StatusServiceUnavailable)
 		return
 	}
-	if err := h.db.Ping(context.Background()); err != nil {
+	if err := h.db.Ping(r.Context()); err != nil {
 		response.RespondError(w, "Database unreachable", http.StatusServiceUnavailable)
 		return
 	}
-	response.RespondSuccess(w, map[string]interface{}{
-		"status":  "healthy",
-		"version": "0.1.0",
-		"database": "connected",
-	}, "System operational")
+	response.RespondSuccess(w, map[string]interface{}{"status":"healthy","version":"0.1.0","database":"connected"}, "System operational")
 }
