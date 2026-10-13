@@ -26,7 +26,7 @@ nonexistent executable.
 - Go version declared by `go.mod` when building the backend.
 - Node.js 20+ and npm for frontend development/build tasks.
 - A generated `infineon` binary for service installation.
-- A strong operator-managed `INFINEON_JWT_SECRET` and database credentials.
+- A strong operator-managed `JWT_SECRET` and database credentials.
 
 Do not commit `.env` files, database passwords, tunnel credentials, or JWT
 secrets. Copy `.env.example` to a protected location and set values through the
@@ -42,8 +42,9 @@ go build -trimpath -ldflags='-s -w' -o bin/infineon ./cmd/infineon
 ```
 
 Install the binary and service as an operator with access to `/usr/local/bin`
-and `/etc/infineon`. Review `infrastructure/infineon.service` and set the
-`INFINEON_ENV_FILE` environment-file path for the host. Then:
+and `/etc/infineon`. Place the protected environment file at
+`/etc/infineon/infineon.env`, then review `infrastructure/infineon.service` and
+run:
 
 ```bash
 sudo install -Dm755 bin/infineon /usr/local/bin/infineon
@@ -65,7 +66,10 @@ go build -trimpath -ldflags="-s -w" -o bin\infineon.exe .\cmd\infineon
 ```
 
 Run the installer from an elevated PowerShell prompt. It is idempotent: reruns
-update the service definition without creating a second service.
+update the service definition without creating a second service. The generated
+wrapper reads the protected env file and sets `DATABASE_URL`, `JWT_SECRET`, and
+other settings only in the service process; secrets are not written to the
+machine-wide environment.
 
 ```powershell
 .\scripts\install-windows-service.ps1 `
