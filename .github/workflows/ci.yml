@@ -15,7 +15,7 @@ jobs:
         env:
           POSTGRES_DB: infineon_test
           POSTGRES_USER: infineon
-          POSTGRES_PASSWORD: infineon
+          POSTGRES_PASSWORD: "postgres"
         ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready
@@ -39,7 +39,7 @@ jobs:
 
       - name: Run tests
         env:
-          DATABASE_URL: [redacted]
+          DATABASE_URL: "postgres://infineon:postgres@localhost:5432/infineon_test"
         run: go test ./... -v
 
   frontend:
