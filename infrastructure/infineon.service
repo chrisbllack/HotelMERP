@@ -1,7 +1,8 @@
 [Unit]
 Description=INFINEON Enterprise Platform
-Documentation=https://docs.infineon.com
-After=network.target postgresql.service
+Documentation=https://github.com/chrisbllack/HotelMERP/blob/main/docs/DEPLOYMENT.md
+After=network-online.target postgresql.service
+Wants=network-online.target
 Requires=postgresql.service
 
 [Service]
@@ -9,26 +10,20 @@ Type=simple
 User=infineon
 Group=infineon
 WorkingDirectory=/var/lib/infineon
-ExecStart=/usr/local/bin/infineon serve --env /var/lib/infineon/.env --port 8080
-Restart=always
-RestartSec=5
-TimeoutStopSec=30
+EnvironmentFile=-/etc/infineon/infineon.env
+Environment=INFINEON_BIND_ADDRESS=127.0.0.1
+ExecStart=/usr/local/bin/infineon serve
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
 
-# Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/infineon
 PrivateTmp=true
-
-# Environment
-Environment=HOME=/var/lib/infineon
-
-# Resource limits
+ReadWritePaths=/var/lib/infineon
 LimitNOFILE=65536
-LimitNPROC=4096
 
-# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=infineon
