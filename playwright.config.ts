@@ -16,4 +16,10 @@ export default defineConfig({
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
   },
+  webServer: {
+    command: 'npm run dev -- --port 5173',
+    url: 'http://localhost:5173/healthz',
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+  },
 });

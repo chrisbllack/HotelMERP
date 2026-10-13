@@ -240,12 +240,9 @@ test.describe('8 · Channel Manager', () => {
     await navigateTo(page, 'channels');
     // Look for Sync Rates button
     const syncBtn = page.locator('button:has-text("Sync Rates"), button:has-text("Sync")').first();
-    if (await syncBtn.isVisible()) {
-      await syncBtn.click();
-      console.log('✅ Sync rates triggered');
-    } else {
-      console.log('ℹ️ Sync button not found — UI may differ');
-    }
+    await expect(syncBtn).toBeVisible();
+    await syncBtn.click();
+    console.log('✅ Sync rates triggered');
   });
 });
 
