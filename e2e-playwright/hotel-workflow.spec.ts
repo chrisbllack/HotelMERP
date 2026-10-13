@@ -10,9 +10,6 @@
 
 import { test, expect, loginViaUI, loginFast, navigateTo, waitForContent, CREDENTIALS } from './fixtures';
 
-// Shared state across the test sequence
-let reservationId: string = '';
-
 // ═══════════════════════════════════════════════════════════════
 // TEST 1: Authentication — Login
 // ═══════════════════════════════════════════════════════════════
@@ -45,9 +42,9 @@ test.describe('1 · Authentication', () => {
     await page.fill('input[type="password"]', 'wrongpass');
     await page.click('button[type="submit"]');
 
-    // Should NOT navigate to dashboard
-    await page.waitForTimeout(3000);
-    expect(page.url()).not.toContain('/dashboard');
+    // Should remain on the login page without relying on a timing window.
+    await expect(page).not.toHaveURL(/\/dashboard/, { timeout: 5_000 });
+    await expect(page.locator('input[type="email"]')).toBeVisible();
     console.log('✅ Wrong credentials — stayed on login page');
   });
 
@@ -90,11 +87,11 @@ test.describe('2 · Front Desk', () => {
     const roomsTab = page.locator('button:has-text("Rooms"), [role="tab"]:has-text("Rooms")');
     if (await roomsTab.count() > 0) {
       await roomsTab.first().click();
-      await page.waitForTimeout(1000);
     }
 
     // Should see room number tiles with status codes (VC, VD, OC, etc.)
     const roomTiles = page.locator('[class*="bg-green-"], [class*="bg-red-"], [class*="bg-blue-"], [class*="bg-purple-"]');
+    await expect.poll(() => roomTiles.count()).toBeGreaterThanOrEqual(5);
     const tileCount = await roomTiles.count();
     console.log(`✅ Found ${tileCount} room status tiles`);
     expect(tileCount).toBeGreaterThanOrEqual(5);
@@ -119,7 +116,6 @@ test.describe('3 · Reservations', () => {
   test('3.2 View existing reservations', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'reservations');
-    await page.waitForTimeout(2000);
 
     // Check for a table or list of reservations
     const rows = page.locator('tr, [class*="reservation"], [class*="card"]');
@@ -151,8 +147,6 @@ test.describe('4 · Rooms Management', () => {
   test('4.1 Navigate to Rooms page and view room list', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'rooms');
-    await page.waitForTimeout(2000);
-
     // Should see rooms
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
@@ -173,8 +167,6 @@ test.describe('5 · POS & Food/Beverage', () => {
   test('5.1 Navigate to POS page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'pos');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ POS page loaded');
@@ -188,8 +180,6 @@ test.describe('5 · POS & Food/Beverage', () => {
   test('5.2 Navigate to Inventory page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'inventory');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ Inventory page loaded');
@@ -204,8 +194,6 @@ test.describe('6 · Housekeeping', () => {
   test('6.1 Navigate to Housekeeping page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'housekeeping');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ Housekeeping page loaded');
@@ -220,8 +208,6 @@ test.describe('7 · Finance', () => {
   test('7.1 Navigate to Finance page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'finance');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ Finance page loaded');
@@ -240,8 +226,6 @@ test.describe('8 · Channel Manager', () => {
   test('8.1 Navigate to Channels and verify OTA channels', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'channels');
-    await page.waitForTimeout(3000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ Channel Manager page loaded');
@@ -254,17 +238,11 @@ test.describe('8 · Channel Manager', () => {
   test('8.2 Sync rates to channels', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'channels');
-    await page.waitForTimeout(2000);
-
     // Look for Sync Rates button
     const syncBtn = page.locator('button:has-text("Sync Rates"), button:has-text("Sync")').first();
-    if (await syncBtn.isVisible()) {
-      await syncBtn.click();
-      await page.waitForTimeout(2000);
-      console.log('✅ Sync rates triggered');
-    } else {
-      console.log('ℹ️ Sync button not found — UI may differ');
-    }
+    await expect(syncBtn).toBeVisible();
+    await syncBtn.click();
+    console.log('✅ Sync rates triggered');
   });
 });
 
@@ -276,8 +254,6 @@ test.describe('9 · HR & Workforce', () => {
   test('9.1 Navigate to HR page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'hr');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ HR page loaded');
@@ -296,8 +272,6 @@ test.describe('10 · Reports', () => {
   test('10.1 Navigate to Reports and view executive dashboard', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'reports');
-    await page.waitForTimeout(3000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ Reports page loaded');
@@ -310,8 +284,6 @@ test.describe('10 · Reports', () => {
   test('10.2 Navigate to Night Audit page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'night-audit');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ Night Audit page loaded');
@@ -326,8 +298,6 @@ test.describe('11 · Revenue Management', () => {
   test('11.1 Navigate to Revenue page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'revenue');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ Revenue Management page loaded');
@@ -336,8 +306,6 @@ test.describe('11 · Revenue Management', () => {
   test('11.2 Navigate to Rate Management page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'rate-management');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ Rate Management page loaded');
@@ -352,8 +320,6 @@ test.describe('12 · Loyalty & CRM', () => {
   test('12.1 Navigate to Loyalty page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'loyalty');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ Loyalty page loaded');
@@ -362,8 +328,6 @@ test.describe('12 · Loyalty & CRM', () => {
   test('12.2 Navigate to CRM page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'crm');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ CRM page loaded');
@@ -378,7 +342,6 @@ test.describe('13 · Guest Portal', () => {
   test('13.1 Navigate to Guest Portal', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'guest-portal');
-    await page.waitForTimeout(2000);
 
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
@@ -404,8 +367,6 @@ test.describe('14 · Booking Engine (Guest-Facing)', () => {
 
   test('14.2 Booking page shows hotel info and search form', async ({ page }) => {
     await page.goto('/book', { waitUntil: 'networkidle' });
-    await page.waitForTimeout(1000);
-
     const bodyText = await page.textContent('body');
     const hasHotelInfo = bodyText?.includes('Hotel') || bodyText?.includes('Room') || bodyText?.includes('Check-in');
     console.log(`✅ Booking page shows hotel info: ${hasHotelInfo}`);
@@ -420,8 +381,6 @@ test.describe('15 · Payments', () => {
   test('15.1 Navigate to Payments page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'payments');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ Payments page loaded');
@@ -436,8 +395,6 @@ test.describe('16 · AI Assistant', () => {
   test('16.1 Navigate to AI Assistant page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'ai');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ AI Assistant page loaded');
@@ -452,8 +409,6 @@ test.describe('17 · Calendar', () => {
   test('17.1 Navigate to Calendar page', async ({ page }) => {
     await loginFast(page, 'admin');
     await navigateTo(page, 'calendar');
-    await page.waitForTimeout(2000);
-
     const heading = page.locator('h1, h2').first();
     await expect(heading).toBeVisible();
     console.log('✅ Calendar page loaded');
