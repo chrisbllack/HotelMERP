@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"infin eon/internal/response"
+	"infineon/internal/response"
 )
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
