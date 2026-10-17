@@ -9,20 +9,27 @@ INFINEON is a modern, enterprise-grade hospitality platform built on-premises fi
 
 ## Quick Start
 
+The supported first-build deployment model is a native host install. The current
+repository contains the Go backend packages and the Vite frontend, but the
+release entrypoint referenced by the existing Go/Docker artifacts
+(`cmd/infineon`) is not present in this checkout yet. Use the frontend workflow
+for UI development until that backend entrypoint is restored.
+
 ```bash
-# Install
-curl -sSL https://get.infineon.com | bash
+# Install the repository's current frontend dependencies
+npm install
 
-# Or manual
-wget https://releases.infineon.com/infineon-linux-amd64 -O /usr/local/bin/infineon
-chmod +x /usr/local/bin/infineon
-infineon install
-
-# Start
-infineon serve --port 8080
+# Start local development (binds Vite to port 3000)
+npm run dev
 ```
 
-Access at `http://localhost:8080`
+Access the development UI at `http://127.0.0.1:3000`.
+
+For the intended native Go + PostgreSQL installation, follow
+[Native Deployment](docs/DEPLOYMENT.md). That runbook documents the supported
+Linux and Windows host matrix, local-only binding, service managers, health
+checks, and optional Cloudflare Tunnel exposure. Existing Docker artifacts are
+retained for compatibility but are not the default deployment path.
 
 ## Architecture
 
