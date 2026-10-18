@@ -20,10 +20,33 @@ import (
 // ═══════════════════════════════════════════════════════════════
 
 type Manager struct {
-	db           *sql.DB
-	providers    map[string]Provider
-	active       string
-	idempotency  *IdempotencyStore
+	db          *sql.DB
+	providers   map[string]Provider
+	active      string
+	idempotency *IdempotencyStore
+	// onCaptured fires exactly once per reference when a payment transitions
+	// to success (verify or webhook) — the ADR-0006 payment.captured origin
+	// for the GL, wired by the server.
+	onCaptured func(context.Context, CaptureInfo)
+}
+
+// CaptureInfo describes a settled payment handed to OnCaptured subscribers.
+type CaptureInfo struct {
+	ID            string
+	PropertyID    string
+	ReservationID string
+	Reference     string
+	Provider      string
+	PaymentMethod string
+	Currency      string
+	AmountKobo    int64
+	Channel       string
+	PaidAt        time.Time
+}
+
+// OnCaptured registers the capture callback (set once at startup).
+func (m *Manager) OnCaptured(fn func(context.Context, CaptureInfo)) {
+	m.onCaptured = fn
 }
 
 // NewManager creates a new payment manager with configured providers.
@@ -92,6 +115,8 @@ func (m *Manager) Initialize(ctx context.Context, req InitializeRequest, idempot
 	m.saveTransaction(ctx, &Transaction{
 		Reference:      req.Reference,
 		Provider:       provider.Name(),
+		PropertyID:     req.PropertyID,
+		ReservationID:  req.ReservationID,
 		Amount:         req.Amount,
 		Currency:       req.Currency,
 		Status:         "pending",
@@ -348,12 +373,61 @@ func (m *Manager) saveTransaction(ctx context.Context, t *Transaction) {
 }
 
 func (m *Manager) updateTransactionStatus(ctx context.Context, reference, status, gatewayRef string, paidAt time.Time) {
-	_, err := m.db.ExecContext(ctx, `
+	// Idempotent transition: a webhook replayed after a successful verify (or
+	// vice versa) must not re-fire capture events.
+	res, err := m.db.ExecContext(ctx, `
 		UPDATE payment_transactions SET status = ?, gateway_ref = ?, updated_at = ?
-		WHERE reference = ?
-	`, status, gatewayRef, time.Now(), reference)
+		WHERE reference = ? AND status <> ?
+	`, status, gatewayRef, time.Now(), reference, status)
 	if err != nil {
 		log.Printf("[payment] Failed to update transaction status: %v", err)
+		return
+	}
+	affected, err := res.RowsAffected()
+	if err != nil || affected == 0 {
+		return
+	}
+	if status == "success" {
+		m.fireCaptured(ctx, reference, paidAt)
+	}
+}
+
+// fireCaptured loads the settled transaction and notifies the capture
+// callback exactly once per status transition.
+func (m *Manager) fireCaptured(ctx context.Context, reference string, paidAt time.Time) {
+	var (
+		id, propertyID, reservationID, provider, method, currency, channel string
+		amount                                                             float64
+	)
+	err := m.db.QueryRowContext(ctx, `
+		SELECT id, COALESCE(property_id, ''), COALESCE(reservation_id, ''), provider,
+		       COALESCE(payment_method, ''), COALESCE(currency, 'NGN'), COALESCE(channel, ''), amount
+		FROM payment_transactions WHERE reference = ?
+	`, reference).Scan(&id, &propertyID, &reservationID, &provider, &method, &currency, &channel, &amount)
+	if err != nil {
+		log.Printf("[payment] Captured but unable to load transaction %s: %v", reference, err)
+		return
+	}
+	if method == "" {
+		method = channel
+	}
+	if paidAt.IsZero() {
+		paidAt = time.Now()
+	}
+	info := CaptureInfo{
+		ID:            id,
+		PropertyID:    propertyID,
+		ReservationID: reservationID,
+		Reference:     reference,
+		Provider:      provider,
+		PaymentMethod: method,
+		Currency:      currency,
+		AmountKobo:    int64(amount*100 + 0.5),
+		Channel:       channel,
+		PaidAt:        paidAt,
+	}
+	if m.onCaptured != nil {
+		m.onCaptured(ctx, info)
 	}
 }
 

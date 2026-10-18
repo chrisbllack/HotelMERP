@@ -7,6 +7,7 @@ import (
 
 	"infineon/internal/auth"
 	"infineon/internal/database"
+	"infineon/internal/events"
 
 	"github.com/google/uuid"
 )
@@ -45,6 +46,9 @@ type Handler struct {
 	jwt   *auth.JWTService
 	audit *AuditLogger
 	PayV2 *PaymentIntegration
+	// Outbox is the ADR-0006 contract bus; nil disables publishing (unit
+	// tests) and subscribers degrade to no-ops.
+	Outbox *events.Outbox
 }
 
 func New(db database.Pool, jwt *auth.JWTService) *Handler {

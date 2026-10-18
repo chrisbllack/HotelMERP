@@ -1895,6 +1895,60 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(employee_id, property_id)
 		)`,
+
+		// ADR-0006 cross-module contract bus (transactional outbox).
+		// `at`/`dispatched_at` are unix milliseconds — engine-neutral and
+		// sortable, matching the Convex contract's Date.now() fields.
+		`CREATE TABLE IF NOT EXISTS domain_events (
+			id TEXT PRIMARY KEY,
+			property_id TEXT NOT NULL,
+			type TEXT NOT NULL,
+			source TEXT NOT NULL DEFAULT '',
+			entity_id TEXT DEFAULT '',
+			payload TEXT NOT NULL DEFAULT '{}',
+			status TEXT NOT NULL DEFAULT 'pending',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT '',
+			emitted_by TEXT,
+			at INTEGER NOT NULL DEFAULT 0,
+			dispatched_at INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_events_property_at ON domain_events(property_id, at)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_events_property_type ON domain_events(property_id, type)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_events_status ON domain_events(status)`,
+
+		// M-FIN ledger engine — integer kobo, engine-neutral (mirrors
+		// migrations/0016_contract_bus.up.sql for Postgres).
+		`CREATE TABLE IF NOT EXISTS gl_accounts (
+			id TEXT PRIMARY KEY,
+			property_id TEXT NOT NULL,
+			code TEXT NOT NULL,
+			name TEXT NOT NULL,
+			type TEXT NOT NULL,
+			subtype TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(property_id, code)
+		)`,
+		`CREATE TABLE IF NOT EXISTS gl_entries (
+			id TEXT PRIMARY KEY,
+			property_id TEXT NOT NULL,
+			business_date DATE NOT NULL,
+			account_code TEXT NOT NULL,
+			debit_kobo INTEGER NOT NULL DEFAULT 0,
+			credit_kobo INTEGER NOT NULL DEFAULT 0,
+			description TEXT NOT NULL DEFAULT '',
+			ref TEXT,
+			source TEXT NOT NULL DEFAULT '',
+			emitted_by TEXT,
+			at INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gl_entries_property_date ON gl_entries(property_id, business_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_gl_entries_ref ON gl_entries(property_id, ref, source)`,
+
+		// Stay-value accrual column for the CRM loyalty subscriber
+		// (duplicate column tolerated on re-run by the migration loop).
+		`ALTER TABLE loyalty_members ADD COLUMN lifetime_value_kobo INTEGER NOT NULL DEFAULT 0`,
 	}
 
 	for _, m := range migrations {

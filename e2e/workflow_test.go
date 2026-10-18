@@ -72,6 +72,34 @@ func requireOK(t *testing.T, name string, status int) {
 	passCount++
 }
 
+// assert records a real invariant: pass on true, fail (visible in the
+// RESULTS line) on false. Softer check() only proves a route exists.
+func assert(t *testing.T, name string, cond bool, detail string) {
+	t.Helper()
+	if cond {
+		t.Logf("  ✅ %s", name)
+		passCount++
+		return
+	}
+	t.Logf("  ⚠️  %s: %s", name, detail)
+	failCount++
+	t.Errorf("%s: %s", name, detail)
+}
+
+// waitFor polls fn until it succeeds or the timeout expires.
+func waitFor(timeout time.Duration, fn func() bool) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if fn() {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
 func TestMain(m *testing.M) {
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get(baseURL + "/health")
@@ -155,7 +183,7 @@ func Test04_Reservation(t *testing.T) {
 		"room_type_id": "rt-standard",
 		"check_in":     time.Now().AddDate(0, 0, 1).Format("2006-01-02"),
 		"check_out":    time.Now().AddDate(0, 0, 3).Format("2006-01-02"),
-		"adults": 2, "total_amount": 50000,
+		"adults":       2, "total_amount": 50000,
 		"status": "confirmed", "source": "walk_in",
 	}, adminToken)
 	check(t, "Create Reservation", s, 200, 201)
@@ -276,7 +304,7 @@ func Test13_GuestBooking(t *testing.T) {
 	s, _ := api("POST", "/booking/search", map[string]interface{}{
 		"check_in":  time.Now().AddDate(0, 0, 1).Format("2006-01-02"),
 		"check_out": time.Now().AddDate(0, 0, 3).Format("2006-01-02"),
-		"adults": 2, "rooms": 1,
+		"adults":    2, "rooms": 1,
 	}, "")
 	check(t, "POST /booking/search (public)", s, 200, 500)
 
@@ -293,7 +321,7 @@ func Test14_RateManagement(t *testing.T) {
 		"room_type_id": "rt-standard", "season_name": "Test Season",
 		"start_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
 		"end_date":   time.Now().AddDate(0, 0, 60).Format("2006-01-02"),
-		"rate": 30000,
+		"rate":       30000,
 	}, adminToken)
 	check(t, "POST /seasonal-rate", s, 200, 201)
 }
@@ -384,4 +412,90 @@ func Test20_SelfService(t *testing.T) {
 
 	s, _ = api("GET", "/self-service/profile", nil, adminToken)
 	check(t, "GET /self-service/profile", s, 200, 404)
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TEST 21: M2b — General Ledger & ADR-0006 Contract Bus
+// ═══════════════════════════════════════════════════════════════
+func Test21_GLAndContractBus(t *testing.T) {
+	t.Log("\n═══ Test 21: GL + Contract Bus (M2b) ═══")
+
+	// 1. Standard chart of accounts is provisioned and readable
+	s, body := api("GET", "/gl/accounts", nil, adminToken)
+	check(t, "GET /gl/accounts", s, 200)
+	if accounts, ok := body["data"].([]interface{}); ok {
+		assert(t, "gl chart >= 20 accounts", len(accounts) >= 20,
+			fmt.Sprintf("got %d accounts", len(accounts)))
+	} else {
+		assert(t, "gl chart payload is an array", false, "data missing or not an array")
+	}
+
+	// 2. Trial balance balances to the kobo
+	s, tb := api("GET", "/gl/trial-balance", nil, adminToken)
+	check(t, "GET /gl/trial-balance", s, 200)
+	if d, ok := tb["data"].(map[string]interface{}); ok {
+		assert(t, "trial balance balances",
+			d["totalDebitKobo"] == d["totalCreditKobo"],
+			fmt.Sprintf("dr=%v cr=%v", d["totalDebitKobo"], d["totalCreditKobo"]))
+	} else {
+		assert(t, "trial balance payload", false, "data missing")
+	}
+
+	// 3. Manual journal posts through the ledger engine
+	s, _ = api("POST", "/gl/journal", map[string]interface{}{
+		"date": time.Now().Format("2006-01-02"), "ref": "E2E-TEST21",
+		"lines": []map[string]interface{}{
+			{"accountCode": "1000", "debitKobo": 12300, "creditKobo": 0, "description": "e2e cash in"},
+			{"accountCode": "4000", "debitKobo": 0, "creditKobo": 12300, "description": "e2e room revenue"},
+		},
+	}, adminToken)
+	check(t, "POST /gl/journal balanced", s, 200, 201)
+
+	// 4. Capture travels the whole bus: payment → outbox → GL → delivered
+	s, init := api("POST", "/payments/v2/initiate", map[string]interface{}{
+		"reservation_id": "", "amount": 12345, "currency": "NGN",
+		"email": "e2e@example.com", "payment_method": "card",
+		"description": "M2b contract bus",
+	}, adminToken)
+	check(t, "POST /payments/v2/initiate", s, 200)
+	ref := ""
+	if d, ok := init["data"].(map[string]interface{}); ok {
+		ref, _ = d["reference"].(string)
+	}
+	assert(t, "payment reference returned", ref != "", fmt.Sprintf("resp=%v", init))
+
+	vs, _ := api("GET", "/payments/v2/verify/"+ref, nil, adminToken)
+	check(t, "GET /payments/v2/verify/{ref}", vs, 200)
+
+	delivered := waitFor(6*time.Second, func() bool {
+		_, de := api("GET", "/domain-events", nil, adminToken)
+		evs, _ := de["data"].([]interface{})
+		for _, e := range evs {
+			m, _ := e.(map[string]interface{})
+			if m["type"] != "payment.captured" || m["status"] != "delivered" {
+				continue
+			}
+			p, _ := m["payload"].(map[string]interface{})
+			if p["reference"] == ref {
+				return true
+			}
+		}
+		return false
+	})
+	assert(t, "payment.captured dispatched to delivered", delivered,
+		fmt.Sprintf("event for ref %s never reached delivered", ref))
+
+	// 5. The GL absorbed the capture without unbalancing
+	_, tb2 := api("GET", "/gl/trial-balance", nil, adminToken)
+	if d, ok := tb2["data"].(map[string]interface{}); ok {
+		assert(t, "trial balance balances after capture",
+			d["totalDebitKobo"] == d["totalCreditKobo"],
+			fmt.Sprintf("dr=%v cr=%v", d["totalDebitKobo"], d["totalCreditKobo"]))
+	} else {
+		assert(t, "trial balance payload after capture", false, "data missing")
+	}
+
+	// 6. Ingest failed events surface for manual retry
+	s, _ = api("GET", "/domain-events/failed", nil, adminToken)
+	check(t, "GET /domain-events/failed", s, 200)
 }

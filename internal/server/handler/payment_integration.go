@@ -89,6 +89,10 @@ func (pi *PaymentIntegration) InitiatePayment(w http.ResponseWriter, r *http.Req
 		Amount:      req.Amount,
 		Currency:    req.Currency,
 		Email:       req.Email,
+		// Tenancy: persisted so webhook-driven captures attribute to the
+		// right property even though webhooks carry no headers.
+		PropertyID:    r.Header.Get("X-Property-ID"),
+		ReservationID: req.ReservationID,
 		Metadata: map[string]string{
 			"reservation_id": req.ReservationID,
 			"payment_method": req.PaymentMethod,

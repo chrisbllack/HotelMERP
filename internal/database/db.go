@@ -82,6 +82,7 @@ func Migrate(db *pgxpool.Pool) error {
 		"0013_crm_events.up.sql",
 		"0014_advanced_modules.up.sql",
 		"0015_identity_bridge.up.sql",
+		"0016_contract_bus.up.sql",
 	}
 
 	sort.Strings(migrations)

@@ -52,6 +52,7 @@ var moduleSegments = map[string]string{
 
 	// Finance
 	"finance":  "finance",
+	"gl":       "finance",
 	"invoices": "finance",
 	"expenses": "finance",
 	"bank-rec": "finance",
@@ -85,18 +86,19 @@ var moduleSegments = map[string]string{
 	"shifts":      "cashier",
 
 	// Platform administration
-	"users":       "users",
-	"roles":       "settings",
-	"permissions": "settings",
-	"properties":  "settings",
-	"settings":    "settings",
-	"config":      "settings",
-	"departments": "settings",
-	"hardware":    "settings",
-	"workflow":    "settings",
-	"documents":   "settings",
-	"backups":     "settings",
-	"audit-logs":  "settings",
+	"users":         "users",
+	"roles":         "settings",
+	"permissions":   "settings",
+	"properties":    "settings",
+	"settings":      "settings",
+	"config":        "settings",
+	"departments":   "settings",
+	"hardware":      "settings",
+	"workflow":      "settings",
+	"documents":     "settings",
+	"backups":       "settings",
+	"audit-logs":    "settings",
+	"domain-events": "settings",
 
 	// Per-user surfaces: authenticated + property-scoped only
 	"notifications": "",

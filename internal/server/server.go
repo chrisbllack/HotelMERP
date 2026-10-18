@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"io/fs"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"infineon/internal/auth"
 	"infineon/internal/config"
 	"infineon/internal/database"
+	"infineon/internal/events"
 	"infineon/internal/payment"
 	"infineon/internal/server/handler"
 	"infineon/internal/server/middleware"
@@ -41,6 +43,16 @@ func New(cfg *config.Config, db database.Pool, staticFiles fs.FS) http.Handler {
 	jwtService := auth.NewJWTService([]byte(cfg.JWTSecret))
 	h := handler.New(db, jwtService)
 
+	// ADR-0006 contract bus: transactional outbox with in-process delivery.
+	// Subscribers register before the boot requeue so recovered events from
+	// a previous run dispatch immediately.
+	outbox := events.NewOutbox(db)
+	h.Outbox = outbox
+	h.RegisterSubscribers(outbox)
+	if n := outbox.RequeuePending(context.Background()); n > 0 {
+		log.Printf("[events] Requeued %d pending domain event(s) from previous run", n)
+	}
+
 	// Initialize payment integration (Paystack + Stripe + Mock)
 	if sqldb, ok := db.(interface{ RawDB() *sql.DB }); ok {
 		payMgr := payment.NewManager(sqldb.RawDB(), payment.Config{
@@ -56,6 +68,36 @@ func New(cfg *config.Config, db database.Pool, staticFiles fs.FS) http.Handler {
 		})
 		h.PayV2 = handler.NewPaymentIntegration(payMgr)
 		log.Printf("[server] Payment integration initialized: provider=%s", cfg.PaymentProvider)
+
+		// payment.captured origin for the GL: fires exactly once per status
+		// transition (verify or webhook, whichever lands second is a no-op).
+		payMgr.OnCaptured(func(ctx context.Context, info payment.CaptureInfo) {
+			pid := info.PropertyID
+			if pid == "" {
+				pid = "00000000-0000-0000-0000-000000000001"
+			}
+			id, err := outbox.Emit(ctx, db, events.EventInput{
+				PropertyID: pid,
+				Type:       events.PaymentCaptured,
+				Source:     "payments",
+				EntityID:   info.ReservationID,
+				Payload: map[string]interface{}{
+					"propertyId":    pid,
+					"date":          info.PaidAt.Format("2006-01-02"),
+					"method":        info.PaymentMethod,
+					"amountKobo":    info.AmountKobo,
+					"reference":     info.Reference,
+					"description":   info.Provider + " payment — " + info.Reference,
+					"reservationId": info.ReservationID,
+				},
+				EmittedBy: "system:payment",
+			})
+			if err != nil {
+				log.Printf("[events] payment.captured emit failed for %s: %v", info.Reference, err)
+				return
+			}
+			outbox.Schedule(id)
+		})
 	}
 
 	// Serve static files if provided
@@ -98,6 +140,22 @@ func New(cfg *config.Config, db database.Pool, staticFiles fs.FS) http.Handler {
 			// enforce module-level permission boundaries on every route.
 			r.Use(middleware.PropertyScope())
 			r.Use(middleware.ModuleRBAC())
+
+			// M-FIN ledger (integer kobo, contract-posted money)
+			r.Route("/gl", func(r chi.Router) {
+				r.Get("/accounts", h.ListGLAccounts)
+				r.Get("/trial-balance", h.GLTrialBalance)
+				r.Get("/profit-and-loss", h.GLProfitAndLoss)
+				r.Get("/entries", h.GLEntryList)
+				r.Post("/journal", h.PostGLJournal)
+			})
+
+			// ADR-0006 contract bus observability (sec.admin inbox)
+			r.Route("/domain-events", func(r chi.Router) {
+				r.Get("/", h.ListDomainEvents)
+				r.Get("/failed", h.ListFailedDomainEvents)
+				r.Post("/{id}/retry", h.RetryDomainEvent)
+			})
 
 			// Users
 			r.Route("/users", func(r chi.Router) {
@@ -506,54 +564,54 @@ func New(cfg *config.Config, db database.Pool, staticFiles fs.FS) http.Handler {
 				})
 				r.Get("/expenses", h.ListExpenseClaims)
 
-			// ── Enterprise HR Extensions ──
-			r.Get("/live-attendance", h.LiveAttendanceDashboard)
-			r.Get("/department-staffing", h.DepartmentStaffing)
-			r.Get("/dashboard", h.HRDashboard)
-			r.Get("/employees-dir", h.ListEmployeesDir)
-			r.Get("/employees/{id}/detail", h.GetEmployeeDetail)
-			r.Route("/shifts", func(r chi.Router) {
-				r.Get("/", h.ListCashShifts)
-				r.Post("/", h.CreateShift)
+				// ── Enterprise HR Extensions ──
+				r.Get("/live-attendance", h.LiveAttendanceDashboard)
+				r.Get("/department-staffing", h.DepartmentStaffing)
+				r.Get("/dashboard", h.HRDashboard)
+				r.Get("/employees-dir", h.ListEmployeesDir)
+				r.Get("/employees/{id}/detail", h.GetEmployeeDetail)
+				r.Route("/shifts", func(r chi.Router) {
+					r.Get("/", h.ListCashShifts)
+					r.Post("/", h.CreateShift)
+				})
+				r.Route("/rosters", func(r chi.Router) {
+					r.Get("/", h.ListRosters)
+					r.Get("/{id}/assignments", h.GetRosterAssignments)
+				})
+				r.Route("/devices", func(r chi.Router) {
+					r.Get("/", h.ListAttendanceDevices)
+					r.Post("/", h.CreateAttendanceDevice)
+					r.Post("/{id}/sync", h.SyncAttendanceDevice)
+					r.Get("/sync-jobs", h.ListSyncJobs)
+				})
+				r.Route("/attendance-records", func(r chi.Router) {
+					r.Get("/", h.ListAttendanceRecords)
+				})
+				r.Put("/leave/requests/{id}/approve", h.ApproveLeaveRequest)
+				r.Get("/holidays", h.ListPublicHolidays)
+				r.Get("/leave-types-all", h.ListLeaveTypesAll)
+				r.Get("/leave-requests-all", h.ListLeaveRequestsAll)
+				r.Get("/training", h.ListTrainingCourses)
+				r.Get("/performance", h.ListPerformanceCycles)
 			})
-			r.Route("/rosters", func(r chi.Router) {
-				r.Get("/", h.ListRosters)
-				r.Get("/{id}/assignments", h.GetRosterAssignments)
-			})
-			r.Route("/devices", func(r chi.Router) {
-				r.Get("/", h.ListAttendanceDevices)
-				r.Post("/", h.CreateAttendanceDevice)
-				r.Post("/{id}/sync", h.SyncAttendanceDevice)
-				r.Get("/sync-jobs", h.ListSyncJobs)
-			})
-			r.Route("/attendance-records", func(r chi.Router) {
-				r.Get("/", h.ListAttendanceRecords)
-			})
-			r.Put("/leave/requests/{id}/approve", h.ApproveLeaveRequest)
-			r.Get("/holidays", h.ListPublicHolidays)
-			r.Get("/leave-types-all", h.ListLeaveTypesAll)
-			r.Get("/leave-requests-all", h.ListLeaveRequestsAll)
-			r.Get("/training", h.ListTrainingCourses)
-			r.Get("/performance", h.ListPerformanceCycles)
-		})
 
-		// ── Employee Self-Service (ESS) ──
-		r.Route("/ess", func(r chi.Router) {
-			r.Get("/my-profile", h.MyProfile)
-			r.Get("/my-attendance", h.GetMyAttendance)
-			r.Get("/my-leaves", h.MyLeaveRequests)
-			r.Post("/my-leaves", h.SubmitLeaveRequest)
-			r.Get("/my-payslips", h.GetMyPayslips)
-			r.Get("/my-leave-balance", h.GetMyLeaveBalance)
-		})
+			// ── Employee Self-Service (ESS) ──
+			r.Route("/ess", func(r chi.Router) {
+				r.Get("/my-profile", h.MyProfile)
+				r.Get("/my-attendance", h.GetMyAttendance)
+				r.Get("/my-leaves", h.MyLeaveRequests)
+				r.Post("/my-leaves", h.SubmitLeaveRequest)
+				r.Get("/my-payslips", h.GetMyPayslips)
+				r.Get("/my-leave-balance", h.GetMyLeaveBalance)
+			})
 
-		// ── Manager Self-Service (MSS) ──
-		r.Route("/mss", func(r chi.Router) {
-			r.Get("/my-team", h.MyTeam)
-			r.Get("/my-team/attendance", h.MyTeamAttendance)
-			r.Get("/pending-leaves", h.PendingLeaveApprovals)
-			r.Post("/approve-leave/{id}", h.ApproveLeave)
-		})
+			// ── Manager Self-Service (MSS) ──
+			r.Route("/mss", func(r chi.Router) {
+				r.Get("/my-team", h.MyTeam)
+				r.Get("/my-team/attendance", h.MyTeamAttendance)
+				r.Get("/pending-leaves", h.PendingLeaveApprovals)
+				r.Post("/approve-leave/{id}", h.ApproveLeave)
+			})
 
 			// CRM
 			r.Route("/crm", func(r chi.Router) {
@@ -657,29 +715,29 @@ func New(cfg *config.Config, db database.Pool, staticFiles fs.FS) http.Handler {
 			})
 
 			// ── Settings Management ──
-		r.Route("/settings", func(r chi.Router) {
-			r.Get("/property", h.GetPropertySettings)
-			r.Put("/property", h.UpdatePropertySettings)
-			r.Get("/system-info", h.GetSystemInfo)
-			r.Get("/db-stats", h.GetDatabaseStats)
-			r.Get("/users", h.ListAllUsers)
-			r.Get("/tax-rates", h.ListTaxRates)
-			r.Post("/tax-rates", h.CreateTaxRate)
-			r.Put("/tax-rates/{id}", h.UpdateTaxRate)
-			r.Delete("/tax-rates/{id}", h.DeleteTaxRate)
-			r.Get("/payment-methods", h.ListPaymentMethods)
-			r.Post("/payment-methods", h.CreatePaymentMethod)
-			r.Put("/payment-methods/{id}", h.UpdatePaymentMethod)
-			r.Delete("/payment-methods/{id}", h.DeletePaymentMethod)
-			r.Get("/departments", h.ListDepartments)
-			r.Post("/departments", h.CreateDepartment)
-			r.Put("/departments/{id}", h.UpdateDepartment)
-			r.Delete("/departments/{id}", h.DeleteDepartment)
-			r.Get("/numbering", h.ListNumberingSequences)
-			r.Put("/numbering/{id}", h.UpdateNumberingSequence)
-			r.Get("/system", h.ListSystemSettings)
-			r.Put("/system", h.UpdateSystemSettings)
-		})
+			r.Route("/settings", func(r chi.Router) {
+				r.Get("/property", h.GetPropertySettings)
+				r.Put("/property", h.UpdatePropertySettings)
+				r.Get("/system-info", h.GetSystemInfo)
+				r.Get("/db-stats", h.GetDatabaseStats)
+				r.Get("/users", h.ListAllUsers)
+				r.Get("/tax-rates", h.ListTaxRates)
+				r.Post("/tax-rates", h.CreateTaxRate)
+				r.Put("/tax-rates/{id}", h.UpdateTaxRate)
+				r.Delete("/tax-rates/{id}", h.DeleteTaxRate)
+				r.Get("/payment-methods", h.ListPaymentMethods)
+				r.Post("/payment-methods", h.CreatePaymentMethod)
+				r.Put("/payment-methods/{id}", h.UpdatePaymentMethod)
+				r.Delete("/payment-methods/{id}", h.DeletePaymentMethod)
+				r.Get("/departments", h.ListDepartments)
+				r.Post("/departments", h.CreateDepartment)
+				r.Put("/departments/{id}", h.UpdateDepartment)
+				r.Delete("/departments/{id}", h.DeleteDepartment)
+				r.Get("/numbering", h.ListNumberingSequences)
+				r.Put("/numbering/{id}", h.UpdateNumberingSequence)
+				r.Get("/system", h.ListSystemSettings)
+				r.Put("/system", h.UpdateSystemSettings)
+			})
 
 			// ── Revenue Management (Opera/Djubo-style) ──
 			r.Route("/revenue", func(r chi.Router) {
@@ -763,7 +821,7 @@ func New(cfg *config.Config, db database.Pool, staticFiles fs.FS) http.Handler {
 				r.Get("/leave", h.ReportLeaveSummary)
 				r.Get("/loyalty", h.ReportLoyalty)
 				r.Get("/events", h.ReportEventRevenue)
-				
+
 				// Night Audit
 				r.Post("/night-audit/run", h.RunNightAudit)
 				r.Get("/night-audit/status", h.GetNightAuditStatus)
@@ -776,7 +834,7 @@ func New(cfg *config.Config, db database.Pool, staticFiles fs.FS) http.Handler {
 
 				// Service Charge Distribution
 				r.Get("/hr/service-charge-pool", h.ServiceChargePool)
-					// Revenue Protection (Staycore-style)
+				// Revenue Protection (Staycore-style)
 				r.Post("/approval-request", h.CreateApprovalRequest)
 				r.Get("/approval-requests", h.ListApprovalRequests)
 				r.Post("/approve-request", h.ApproveRevenueRequest)
@@ -827,7 +885,7 @@ func New(cfg *config.Config, db database.Pool, staticFiles fs.FS) http.Handler {
 			r.Get("/channels/sync-log", h.ChannelSyncLog)
 			r.Get("/channels/bookings", h.ChannelBookings)
 			r.Put("/channels/settings", h.UpdateChannelSettings)
-				// RBAC & Access Control
+			// RBAC & Access Control
 			r.Get("/permissions", h.ListPermissions)
 			r.Get("/roles", h.ListRoles)
 

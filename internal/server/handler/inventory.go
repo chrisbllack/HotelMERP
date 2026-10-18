@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"infineon/internal/auth"
+	"infineon/internal/events"
 	"infineon/internal/response"
 
 	"github.com/go-chi/chi/v5"
@@ -306,6 +307,44 @@ func (h *Handler) RecordStockMovement(w http.ResponseWriter, r *http.Request) {
 			WHERE product_id = $1 AND store_id = $2 AND quantity >= $3
 		`, req.ProductID, req.FromStoreID, req.Quantity)
 	}
+
+	// ADR-0006: publish the movement — the M-INV subscriber runs the reorder
+	// check (drafting a replenishment PO or raising stock.low) without this
+	// handler knowing anything about procurement.
+	var sku string
+	var productReorder float64
+	h.db.QueryRow(context.Background(), `
+		SELECT COALESCE(sku, ''), COALESCE(reorder_level, 0)
+		FROM inventory_products WHERE id = $1
+	`, req.ProductID).Scan(&sku, &productReorder)
+
+	var qtyOnHand float64
+	h.db.QueryRow(context.Background(), `
+		SELECT COALESCE(SUM(quantity), 0) FROM inventory_stock WHERE product_id = $1
+	`, req.ProductID).Scan(&qtyOnHand)
+
+	movementType := "adjust"
+	if req.ToStoreID != "" {
+		movementType = "receive"
+	} else if req.FromStoreID != "" {
+		movementType = "issue"
+	}
+
+	movEv, err := h.emitDomainEvent(r.Context(), h.db, propertyID, eventActor(r),
+		events.StockMovement, "inventory", req.ProductID, map[string]interface{}{
+			"propertyId":   propertyID,
+			"itemId":       req.ProductID,
+			"sku":          sku,
+			"type":         movementType,
+			"delta":        req.Quantity,
+			"qtyOnHand":    qtyOnHand,
+			"reorderLevel": productReorder,
+		})
+	if err != nil {
+		response.RespondError(w, "Failed to record domain event", http.StatusInternalServerError)
+		return
+	}
+	h.ScheduleEvent(movEv)
 
 	response.RespondSuccess(w, map[string]interface{}{"id": movID}, "Stock movement recorded successfully", http.StatusCreated)
 }

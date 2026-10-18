@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"infineon/internal/auth"
+	"infineon/internal/events"
+	"infineon/internal/ledger"
 	"infineon/internal/response"
 
 	"github.com/go-chi/chi/v5"
@@ -504,9 +506,9 @@ func (h *Handler) CheckAvailability(w http.ResponseWriter, r *http.Request) {
 	`, roomTypeID, dateFrom, dateTo).Scan(&bookedRooms)
 
 	response.RespondSuccess(w, map[string]interface{}{
-		"available":      available,
-		"total_rooms":    totalRooms,
-		"booked_rooms":   bookedRooms,
+		"available":       available,
+		"total_rooms":     totalRooms,
+		"booked_rooms":    bookedRooms,
 		"available_rooms": totalRooms - bookedRooms,
 	}, "Availability checked successfully")
 }
@@ -532,10 +534,10 @@ func (h *Handler) checkAvailability(ctx context.Context, propertyID, roomTypeID,
 // ── Check-in ──────────────────────────────────────────────
 
 type CheckInRequest struct {
-	RoomID       string `json:"room_id"`
-	IDType       string `json:"id_type"`
-	IDNumber     string `json:"id_number"`
-	DepositPaid  float64 `json:"deposit_paid"`
+	RoomID      string  `json:"room_id"`
+	IDType      string  `json:"id_type"`
+	IDNumber    string  `json:"id_number"`
+	DepositPaid float64 `json:"deposit_paid"`
 }
 
 func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
@@ -675,6 +677,19 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO folio_lines (id, folio_id, property_id, type, charge_code, description, quantity, unit_price, amount, tax_amount, business_date, posted_by)
 		VALUES ($1, $2, $3, 'debit', 'ROOM', 'Room charge - Night 1', 1, $4, $5, $6, CURRENT_DATE, $7)
 	`, uuid.New(), folioID, propertyID, roomCharge, roomCharge, taxAmount, createdBy)
+	if err != nil {
+		response.RespondError(w, "Failed to post room charge", http.StatusInternalServerError)
+		return
+	}
+
+	// M-FIN contract: recognize room revenue atomically with the charge
+	// (Dr Guest Ledger, Cr Room Revenue + VAT). Money always posts through
+	// the ledger — check-in rolls back if it cannot.
+	if _, err := ledger.PostFolioCharge(r.Context(), tx, propertyID, "ROOM",
+		roomCharge, taxAmount, "Room charge - Night 1", fmt.Sprintf("CHKIN-%s", id), eventActor(r)); err != nil {
+		response.RespondError(w, "Ledger posting failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	// Record status history
 	tx.Exec(r.Context(), `
@@ -682,10 +697,37 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 		VALUES ($1, 'confirmed', 'checked_in', $2, NOW())
 	`, id, createdBy)
 
+	// ADR-0006 outbox: publish inside the transaction so the events commit
+	// with the state change; deliver only after commit.
+	checkedInEv, err := h.emitDomainEvent(r.Context(), tx, propertyID, eventActor(r),
+		events.ReservationCheckedIn, "reservations", id, map[string]interface{}{
+			"propertyId":    propertyID,
+			"guestId":       guestID,
+			"reservationId": id,
+		})
+	if err != nil {
+		response.RespondError(w, "Failed to record domain event", http.StatusInternalServerError)
+		return
+	}
+	folioEv, err := h.emitDomainEvent(r.Context(), tx, propertyID, eventActor(r),
+		events.FolioOpened, "reservations", folioID.String(), map[string]interface{}{
+			"propertyId":    propertyID,
+			"guestId":       guestID,
+			"reservationId": id,
+			"folioId":       folioID.String(),
+			"folioNumber":   folioNumber,
+		})
+	if err != nil {
+		response.RespondError(w, "Failed to record domain event", http.StatusInternalServerError)
+		return
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		response.RespondError(w, "Check-in transaction failed", http.StatusInternalServerError)
 		return
 	}
+	h.ScheduleEvent(checkedInEv)
+	h.ScheduleEvent(folioEv)
 
 	response.RespondSuccess(w, map[string]interface{}{
 		"reservation_id": id, "guest_stay_id": stayID, "folio_id": folioID,
@@ -713,17 +755,18 @@ func (h *Handler) CheckOut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get reservation and stay info
-	var currentStatus, roomID, guestID, folioID, folioNumber string
+	var currentStatus, roomID, guestID, stayID, folioID, folioNumber string
 	var balance float64
+	var nights int
 
 	err := h.db.QueryRow(context.Background(), `
-		SELECT res.status, res.room_id::text, res.guest_id::text, gs.id::text, f.id::text, f.folio_number, f.balance
+		SELECT res.status, res.room_id::text, res.guest_id::text, gs.id::text, f.id::text, f.folio_number, f.balance, res.nights
 		FROM reservations res
 		JOIN guest_stays gs ON gs.reservation_id = res.id
 		JOIN folios f ON f.guest_stay_id = gs.id
 		WHERE res.id = $1 AND res.property_id = $2 AND res.deleted_at IS NULL
 		AND gs.status = 'in_house'
-	`, id, propertyID).Scan(&currentStatus, &roomID, &guestID, &folioID, &folioNumber, &balance)
+	`, id, propertyID).Scan(&currentStatus, &roomID, &guestID, &stayID, &folioID, &folioNumber, &balance, &nights)
 
 	if err != nil {
 		response.RespondError(w, "No active stay found for this reservation", http.StatusNotFound)
@@ -749,11 +792,40 @@ func (h *Handler) CheckOut(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	// Post final payment if provided
+	paymentEv := ""
 	if req.PaymentAmount > 0 {
-		tx.Exec(r.Context(), `
+		method := req.PaymentMethod
+		if method == "" {
+			method = "cash"
+		}
+		reference := req.PaymentRef
+		if reference == "" {
+			reference = fmt.Sprintf("CO-%s", folioNumber)
+		}
+
+		_, err := tx.Exec(r.Context(), `
 			INSERT INTO folio_lines (id, folio_id, property_id, type, charge_code, description, amount, business_date, posted_by)
-			VALUES ($1, $2, $3, 'credit', 'PAYMENT', $4 || ' payment', $4, CURRENT_DATE, $5)
-		`, uuid.New(), folioID, propertyID, req.PaymentAmount, req.PaymentMethod, createdBy)
+			VALUES ($1, $2, $3, 'credit', 'PAYMENT', $4 || ' payment', $5, CURRENT_DATE, $6)
+		`, uuid.New(), folioID, propertyID, method, req.PaymentAmount, createdBy)
+		if err != nil {
+			response.RespondError(w, "Failed to post checkout payment", http.StatusInternalServerError)
+			return
+		}
+		// ADR-0006: the settlement travels the contract bus atomically with
+		// the credit — M-FIN posts Dr cash/bank, Cr Guest Ledger.
+		paymentEv, err = h.emitDomainEvent(r.Context(), tx, propertyID, eventActor(r),
+			events.PaymentCaptured, "frontdesk", id, map[string]interface{}{
+				"propertyId":  propertyID,
+				"date":        time.Now().Format("2006-01-02"),
+				"method":      method,
+				"amountKobo":  ledger.NairaToKobo(req.PaymentAmount),
+				"reference":   reference,
+				"description": fmt.Sprintf("Check-out settlement — folio %s", folioNumber),
+			})
+		if err != nil {
+			response.RespondError(w, "Failed to record domain event", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Close folio
@@ -764,8 +836,8 @@ func (h *Handler) CheckOut(w http.ResponseWriter, r *http.Request) {
 	// Update guest stay
 	tx.Exec(r.Context(), `
 		UPDATE guest_stays SET actual_departure = NOW(), status = 'checked_out', updated_at = NOW()
-		WHERE id = $2
-	`, folioID)
+		WHERE id = $1
+	`, stayID)
 
 	// Update reservation status
 	tx.Exec(r.Context(), `
@@ -790,10 +862,36 @@ func (h *Handler) CheckOut(w http.ResponseWriter, r *http.Request) {
 		WHERE reservation_id = $1
 	`, id)
 
+	// Total debited on the folio — M-CRM accrues points from this value.
+	var totalCharges float64
+	if err := tx.QueryRow(r.Context(), `
+		SELECT COALESCE(SUM(amount), 0) FROM folio_lines
+		WHERE folio_id = $1 AND type = 'debit' AND is_voided = FALSE
+	`, folioID).Scan(&totalCharges); err != nil {
+		response.RespondError(w, "Failed to total folio charges", http.StatusInternalServerError)
+		return
+	}
+
+	checkedOutEv, err := h.emitDomainEvent(r.Context(), tx, propertyID, eventActor(r),
+		events.ReservationCheckedOut, "reservations", id, map[string]interface{}{
+			"propertyId":    propertyID,
+			"guestId":       guestID,
+			"reservationId": id,
+			"nights":        nights,
+			"totalKobo":     ledger.NairaToKobo(totalCharges),
+			"folioCode":     folioNumber,
+		})
+	if err != nil {
+		response.RespondError(w, "Failed to record domain event", http.StatusInternalServerError)
+		return
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		response.RespondError(w, "Check-out transaction failed", http.StatusInternalServerError)
 		return
 	}
+	h.ScheduleEvent(paymentEv)
+	h.ScheduleEvent(checkedOutEv)
 
 	response.RespondSuccess(w, map[string]interface{}{
 		"reservation_id": id, "folio_number": folioNumber, "balance": balance,
@@ -920,7 +1018,17 @@ func (h *Handler) PostCharge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lineID := uuid.New()
-	_, err := h.db.Exec(context.Background(), `
+
+	// Transactional: the folio line, its revenue recognition and its outbox
+	// event commit together — or not at all.
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		response.RespondError(w, "Transaction failed", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	_, err = tx.Exec(r.Context(), `
 		INSERT INTO folio_lines (id, folio_id, property_id, type, charge_code, description, quantity, unit_price, amount, tax_amount, business_date, posted_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_DATE, $11)
 	`, lineID, folioID, propertyID, lineType, req.ChargeCode, req.Description,
@@ -930,6 +1038,38 @@ func (h *Handler) PostCharge(w http.ResponseWriter, r *http.Request) {
 		response.RespondError(w, "Failed to post charge", http.StatusInternalServerError)
 		return
 	}
+
+	// M-FIN contract: recognize revenue for debit lines (Dr Guest Ledger,
+	// Cr revenue by charge code, +Cr VAT). Credit lines are settlements, not
+	// revenue — cash arrives through payment.captured instead.
+	if lineType == "debit" && amount+req.TaxAmount > 0 {
+		if _, err := ledger.PostFolioCharge(r.Context(), tx, propertyID, req.ChargeCode,
+			amount, req.TaxAmount, req.Description, fmt.Sprintf("FOLIO-%s", folioID), eventActor(r)); err != nil {
+			response.RespondError(w, "Ledger posting failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// ADR-0006: record the charge on the contract bus atomically with it.
+	chargeEv, err := h.emitDomainEvent(r.Context(), tx, propertyID, eventActor(r),
+		events.FolioChargePosted, "folio", lineID.String(), map[string]interface{}{
+			"propertyId": propertyID,
+			"folioId":    folioID,
+			"chargeCode": req.ChargeCode,
+			"type":       lineType,
+			"amountKobo": ledger.NairaToKobo(amount),
+			"taxKobo":    ledger.NairaToKobo(req.TaxAmount),
+		})
+	if err != nil {
+		response.RespondError(w, "Failed to record domain event", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		response.RespondError(w, "Failed to post charge", http.StatusInternalServerError)
+		return
+	}
+	h.ScheduleEvent(chargeEv)
 
 	response.RespondSuccess(w, map[string]interface{}{
 		"id": lineID, "amount": amount, "type": lineType,
@@ -1012,13 +1152,13 @@ func (h *Handler) FrontDeskDashboard(w http.ResponseWriter, r *http.Request) {
 	`, propertyID).Scan(&outstandingBalance)
 
 	response.RespondSuccess(w, map[string]interface{}{
-		"arrivals":          arrivals,
-		"departures":        departures,
-		"in_house":          inHouse,
-		"available_rooms":   availableRooms,
-		"occupied_rooms":    occupiedRooms,
-		"vip_arrivals":      vipArrivals,
-		"outstanding_balance": outstandingBalance,
+		"arrivals":              arrivals,
+		"departures":            departures,
+		"in_house":              inHouse,
+		"available_rooms":       availableRooms,
+		"occupied_rooms":        occupiedRooms,
+		"vip_arrivals":          vipArrivals,
+		"outstanding_balance":   outstandingBalance,
 		"room_status_breakdown": statusBreakdown,
 	}, "Front desk dashboard retrieved successfully")
 }
@@ -1079,16 +1219,16 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateProperty(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		CompanyID    string `json:"company_id"`
-		Name         string `json:"name"`
-		TradingName  string `json:"trading_name"`
-		Code         string `json:"code"`
-		Address      string `json:"address"`
-		City         string `json:"city"`
-		State        string `json:"state"`
-		Phone        string `json:"phone"`
-		Email        string `json:"email"`
-		Timezone     string `json:"timezone"`
+		CompanyID   string `json:"company_id"`
+		Name        string `json:"name"`
+		TradingName string `json:"trading_name"`
+		Code        string `json:"code"`
+		Address     string `json:"address"`
+		City        string `json:"city"`
+		State       string `json:"state"`
+		Phone       string `json:"phone"`
+		Email       string `json:"email"`
+		Timezone    string `json:"timezone"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.RespondError(w, "Invalid request body", http.StatusBadRequest)
@@ -1310,5 +1450,3 @@ func nullString(s string) interface{} {
 	}
 	return sql.NullString{String: s, Valid: true}
 }
-
-
