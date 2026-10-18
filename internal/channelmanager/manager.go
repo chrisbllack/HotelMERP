@@ -34,19 +34,19 @@ type OTAProvider interface {
 type Channel struct {
 	ID             string            `json:"id"`
 	PropertyID     string            `json:"property_id"`
-	Name           string            `json:"name"`       // "Booking.com", "Expedia", etc.
-	Code           string            `json:"code"`       // "bkng", "expe", "airb", "agda", "jumia", "hotels_ng", "wakanow"
+	Name           string            `json:"name"` // "Booking.com", "Expedia", etc.
+	Code           string            `json:"code"` // "bkng", "expe", "airb", "agda", "jumia", "hotels_ng", "wakanow"
 	Enabled        bool              `json:"enabled"`
-	Status         string            `json:"status"`     // connected, disconnected, error, syncing
-	Commission     float64           `json:"commission"` // percentage
-	Markup         float64           `json:"markup"`     // percentage markup on base rate
+	Status         string            `json:"status"`      // connected, disconnected, error, syncing
+	Commission     float64           `json:"commission"`  // percentage
+	Markup         float64           `json:"markup"`      // percentage markup on base rate
 	MarkupType     string            `json:"markup_type"` // percentage, fixed
 	MinStay        int               `json:"min_stay"`
 	MaxStay        int               `json:"max_stay"`
 	StopSellDates  []string          `json:"stop_sell_dates"`
 	APIKey         string            `json:"api_key,omitempty"`
 	APISecret      string            `json:"api_secret,omitempty"`
-	HotelID        string            `json:"hotel_id"`   // OTA's hotel ID
+	HotelID        string            `json:"hotel_id"` // OTA's hotel ID
 	LastSyncAt     *time.Time        `json:"last_sync_at"`
 	LastSyncStatus string            `json:"last_sync_status"`
 	TotalBookings  int               `json:"total_bookings"`
@@ -69,24 +69,24 @@ type ChannelMapping struct {
 
 // RatePushRequest contains rates to push to an OTA
 type RatePushRequest struct {
-	ChannelID string      `json:"channel_id"`
-	RoomType  string      `json:"room_type_id"`
-	Rates     []DateRate  `json:"rates"`
+	ChannelID string     `json:"channel_id"`
+	RoomType  string     `json:"room_type_id"`
+	Rates     []DateRate `json:"rates"`
 }
 
 // DateRate represents a rate for a specific date
 type DateRate struct {
-	Date        string  `json:"date"`
-	Rate        float64 `json:"rate"`
-	MinStay     int     `json:"min_stay"`
-	Closed      bool    `json:"closed"`
-	StopSell    bool    `json:"stop_sell"`
+	Date     string  `json:"date"`
+	Rate     float64 `json:"rate"`
+	MinStay  int     `json:"min_stay"`
+	Closed   bool    `json:"closed"`
+	StopSell bool    `json:"stop_sell"`
 }
 
 // AvailabilityPushRequest contains availability to push
 type AvailabilityPushRequest struct {
-	ChannelID   string           `json:"channel_id"`
-	Availabilities []DateAvail   `json:"availabilities"`
+	ChannelID      string      `json:"channel_id"`
+	Availabilities []DateAvail `json:"availabilities"`
 }
 
 // DateAvail represents availability for a date
@@ -99,38 +99,38 @@ type DateAvail struct {
 
 // SyncResponse is the result of a sync operation
 type SyncResponse struct {
-	Success    bool   `json:"success"`
-	Message    string `json:"message"`
-	SyncedItems int   `json:"synced_items"`
-	FailedItems int   `json:"failed_items"`
-	Timestamp  string `json:"timestamp"`
+	Success     bool   `json:"success"`
+	Message     string `json:"message"`
+	SyncedItems int    `json:"synced_items"`
+	FailedItems int    `json:"failed_items"`
+	Timestamp   string `json:"timestamp"`
 }
 
 // OTABooking is a booking imported from an OTA
 type OTABooking struct {
-	ChannelID       string            `json:"channel_id"`
-	ChannelCode     string            `json:"channel_code"`
-	OTAReservationID string           `json:"ota_reservation_id"`
-	GuestName       string            `json:"guest_name"`
-	GuestEmail      string            `json:"guest_email"`
-	GuestPhone      string            `json:"guest_phone"`
-	RoomTypeID      string            `json:"room_type_id"`
-	RatePlanID      string            `json:"rate_plan_id"`
-	CheckIn         string            `json:"check_in"`
-	CheckOut        string            `json:"check_out"`
-	Nights          int               `json:"nights"`
-	RatePerNight    float64           `json:"rate_per_night"`
-	TotalAmount     float64           `json:"total_amount"`
-	Currency        string            `json:"currency"`
-	Status          string            `json:"status"` // confirmed, modified, cancelled
-	PaymentStatus   string            `json:"payment_status"`
-	NumberOfGuests  int               `json:"number_of_guests"`
-	SpecialRequests string            `json:"special_requests"`
-	BookingSource   string            `json:"booking_source"`
-	Commission      float64           `json:"commission"`
-	NetRate         float64           `json:"net_rate"`
-	BookedAt        string            `json:"booked_at"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
+	ChannelID        string            `json:"channel_id"`
+	ChannelCode      string            `json:"channel_code"`
+	OTAReservationID string            `json:"ota_reservation_id"`
+	GuestName        string            `json:"guest_name"`
+	GuestEmail       string            `json:"guest_email"`
+	GuestPhone       string            `json:"guest_phone"`
+	RoomTypeID       string            `json:"room_type_id"`
+	RatePlanID       string            `json:"rate_plan_id"`
+	CheckIn          string            `json:"check_in"`
+	CheckOut         string            `json:"check_out"`
+	Nights           int               `json:"nights"`
+	RatePerNight     float64           `json:"rate_per_night"`
+	TotalAmount      float64           `json:"total_amount"`
+	Currency         string            `json:"currency"`
+	Status           string            `json:"status"` // confirmed, modified, cancelled
+	PaymentStatus    string            `json:"payment_status"`
+	NumberOfGuests   int               `json:"number_of_guests"`
+	SpecialRequests  string            `json:"special_requests"`
+	BookingSource    string            `json:"booking_source"`
+	Commission       float64           `json:"commission"`
+	NetRate          float64           `json:"net_rate"`
+	BookedAt         string            `json:"booked_at"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
 }
 
 // BookingConfirmation sent back to OTA
@@ -144,12 +144,12 @@ type BookingConfirmation struct {
 
 // MappingStatus shows current mapping health
 type MappingStatus struct {
-	TotalRoomTypes   int `json:"total_room_types"`
-	MappedRoomTypes  int `json:"mapped_room_types"`
-	TotalRatePlans   int `json:"total_rate_plans"`
-	MappedRatePlans  int `json:"mapped_rate_plans"`
-	UnmappedItems    int `json:"unmapped_items"`
-	Errors           int `json:"errors"`
+	TotalRoomTypes  int `json:"total_room_types"`
+	MappedRoomTypes int `json:"mapped_room_types"`
+	TotalRatePlans  int `json:"total_rate_plans"`
+	MappedRatePlans int `json:"mapped_rate_plans"`
+	UnmappedItems   int `json:"unmapped_items"`
+	Errors          int `json:"errors"`
 }
 
 // SyncLogEntry records a sync operation
@@ -169,7 +169,7 @@ type SyncLogEntry struct {
 
 // ChannelManager orchestrates all OTA connections
 type ChannelManager struct {
-	db       *sql.DB
+	db        *sql.DB
 	providers map[string]OTAProvider
 }
 
@@ -544,7 +544,7 @@ func (cm *ChannelManager) SyncAvailabilityToAll(ctx context.Context, propertyID 
 		}
 
 		resp, err := provider.PushAvailability(ctx, &AvailabilityPushRequest{
-			ChannelID:     ch.ID,
+			ChannelID:      ch.ID,
 			Availabilities: avails,
 		})
 		if err != nil {
@@ -564,6 +564,7 @@ func (cm *ChannelManager) SyncAvailabilityToAll(ctx context.Context, propertyID 
 
 	return &SyncResponse{
 		Success:     totalFailed == 0,
+		Message:     fmt.Sprintf("Synced availability to %d channels", len(channels)),
 		SyncedItems: totalSynced,
 		FailedItems: totalFailed,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
@@ -666,13 +667,13 @@ func (cm *ChannelManager) GetChannelPerformance(ctx context.Context, propertyID 
 		Share           float64 `json:"revenue_share_pct"`
 	}
 
-	var perfs []ChannelPerf
+	perfs := []ChannelPerf{}
 	totalRev := 0.0
 
 	for _, ch := range channels {
 		perf := ChannelPerf{
-			Name:      ch.Name,
-			Code:      ch.Code,
+			Name:       ch.Name,
+			Code:       ch.Code,
 			Commission: ch.Commission,
 		}
 
@@ -698,9 +699,9 @@ func (cm *ChannelManager) GetChannelPerformance(ctx context.Context, propertyID 
 	}
 
 	return map[string]interface{}{
-		"channels":   perfs,
+		"channels":      perfs,
 		"total_revenue": totalRev,
-		"period":     "All time",
+		"period":        "All time",
 	}
 }
 
@@ -715,11 +716,11 @@ func (cm *ChannelManager) GetSyncLog(ctx context.Context, channelID string, limi
 		FROM channel_sync_log WHERE channel_id=?
 		ORDER BY created_at DESC LIMIT ?`, channelID, limit)
 	if err != nil {
-		return nil
+		return []SyncLogEntry{}
 	}
 	defer rows.Close()
 
-	var logs []SyncLogEntry
+	logs := []SyncLogEntry{}
 	for rows.Next() {
 		var log SyncLogEntry
 		rows.Scan(&log.ID, &log.ChannelID, &log.ChannelName, &log.Direction, &log.Type,
@@ -731,8 +732,8 @@ func (cm *ChannelManager) GetSyncLog(ctx context.Context, channelID string, limi
 
 // GetChannelBookings returns bookings from a specific channel
 func (cm *ChannelManager) GetChannelBookings(ctx context.Context, channelID string, status string) []OTABooking {
-	sqlQuery := `SELECT COALESCE(channel_code,''), COALESCE(channel_booking_ref,''), COALESCE(guest_name,''), COALESCE(guest_email,''),
-		COALESCE(room_type,''), COALESCE(check_in,''), COALESCE(check_out,''), COALESCE(nights,1), COALESCE(rate_per_night,0), COALESCE(total_amount,0),
+	sqlQuery := `SELECT COALESCE(channel_code,''), COALESCE(ota_reservation_id,''), COALESCE(guest_name,''), COALESCE(guest_email,''),
+		COALESCE(room_type_id,''), COALESCE(check_in,''), COALESCE(check_out,''), COALESCE(nights,1), COALESCE(rate_per_night,0), COALESCE(total_amount,0),
 		COALESCE(commission,0), COALESCE(net_amount,0), COALESCE(currency,'NGN'), COALESCE(status,'confirmed'), COALESCE(payment_status,'pending'), COALESCE(number_of_guests,1)
 		FROM channel_bookings WHERE channel_id=?`
 	args := []interface{}{channelID}
@@ -741,15 +742,15 @@ func (cm *ChannelManager) GetChannelBookings(ctx context.Context, channelID stri
 		sqlQuery += ` AND status=?`
 		args = append(args, status)
 	}
-	sqlQuery += ` ORDER BY created_at DESC LIMIT 100`
+	sqlQuery += ` ORDER BY booked_at DESC LIMIT 100`
 
 	rows, err := cm.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
-		return nil
+		return []OTABooking{}
 	}
 	defer rows.Close()
 
-	var bookings []OTABooking
+	bookings := []OTABooking{}
 	for rows.Next() {
 		var bk OTABooking
 		rows.Scan(&bk.ChannelCode, &bk.OTAReservationID, &bk.GuestName, &bk.GuestEmail,
@@ -773,7 +774,7 @@ func (cm *ChannelManager) UpdateChannelSettings(ctx context.Context, channelID s
 
 func (cm *ChannelManager) getRoomTypesWithRates(ctx context.Context, propertyID string, channelMarkup float64) map[string]float64 {
 	rows, err := cm.db.QueryContext(ctx,
-		`SELECT id, base_price FROM room_types WHERE property_id=? AND status='active'`, propertyID)
+		`SELECT id, base_rate FROM room_types WHERE property_id=? AND status='active'`, propertyID)
 	if err != nil {
 		return nil
 	}
@@ -792,7 +793,7 @@ func (cm *ChannelManager) getRoomTypesWithRates(ctx context.Context, propertyID 
 
 func (cm *ChannelManager) getRoomAvailability(ctx context.Context, propertyID string) map[string]int {
 	rows, err := cm.db.QueryContext(ctx,
-		`SELECT room_type_id, COUNT(*) FROM rooms WHERE property_id=? AND status IN ('available','clean','dirty')
+		`SELECT room_type_id, COUNT(*) FROM rooms WHERE property_id=? AND status IN ('vacant_clean','vacant_dirty')
 		GROUP BY room_type_id`, propertyID)
 	if err != nil {
 		return nil
@@ -819,6 +820,7 @@ func (cm *ChannelManager) logSync(ctx context.Context, channelID, channelName, d
 // ─── OTA PROVIDERS (Mock implementations for demo) ──────────
 
 type BookingComProvider struct{ name, code string }
+
 func (p *BookingComProvider) Name() string { return p.name }
 func (p *BookingComProvider) PushRates(ctx context.Context, req *RatePushRequest) (*SyncResponse, error) {
 	log.Printf("[BOOKING.COM] Pushing %d rates for %s", len(req.Rates), req.RoomType)
@@ -844,6 +846,7 @@ func (p *BookingComProvider) GetMappingStatus(ctx context.Context) (*MappingStat
 func (p *BookingComProvider) TestConnection(ctx context.Context) error { return nil }
 
 type ExpediaProvider struct{ name, code string }
+
 func (p *ExpediaProvider) Name() string { return p.name }
 func (p *ExpediaProvider) PushRates(ctx context.Context, req *RatePushRequest) (*SyncResponse, error) {
 	log.Printf("[EXPEDIA] Pushing %d rates for %s", len(req.Rates), req.RoomType)
@@ -867,6 +870,7 @@ func (p *ExpediaProvider) GetMappingStatus(ctx context.Context) (*MappingStatus,
 func (p *ExpediaProvider) TestConnection(ctx context.Context) error { return nil }
 
 type AirbnbProvider struct{ name, code string }
+
 func (p *AirbnbProvider) Name() string { return p.name }
 func (p *AirbnbProvider) PushRates(ctx context.Context, req *RatePushRequest) (*SyncResponse, error) {
 	log.Printf("[AIRBNB] Pushing %d rates for %s", len(req.Rates), req.RoomType)
@@ -890,6 +894,7 @@ func (p *AirbnbProvider) GetMappingStatus(ctx context.Context) (*MappingStatus, 
 func (p *AirbnbProvider) TestConnection(ctx context.Context) error { return nil }
 
 type AgodaProvider struct{ name, code string }
+
 func (p *AgodaProvider) Name() string { return p.name }
 func (p *AgodaProvider) PushRates(ctx context.Context, req *RatePushRequest) (*SyncResponse, error) {
 	log.Printf("[AGODA] Pushing %d rates for %s", len(req.Rates), req.RoomType)
@@ -913,6 +918,7 @@ func (p *AgodaProvider) GetMappingStatus(ctx context.Context) (*MappingStatus, e
 func (p *AgodaProvider) TestConnection(ctx context.Context) error { return nil }
 
 type JumiaTravelProvider struct{ name, code string }
+
 func (p *JumiaTravelProvider) Name() string { return p.name }
 func (p *JumiaTravelProvider) PushRates(ctx context.Context, req *RatePushRequest) (*SyncResponse, error) {
 	log.Printf("[JUMIA TRAVEL] Pushing %d rates for %s", len(req.Rates), req.RoomType)
@@ -936,6 +942,7 @@ func (p *JumiaTravelProvider) GetMappingStatus(ctx context.Context) (*MappingSta
 func (p *JumiaTravelProvider) TestConnection(ctx context.Context) error { return nil }
 
 type HotelsNGProvider struct{ name, code string }
+
 func (p *HotelsNGProvider) Name() string { return p.name }
 func (p *HotelsNGProvider) PushRates(ctx context.Context, req *RatePushRequest) (*SyncResponse, error) {
 	return &SyncResponse{Success: true, SyncedItems: len(req.Rates)}, nil
@@ -958,6 +965,7 @@ func (p *HotelsNGProvider) GetMappingStatus(ctx context.Context) (*MappingStatus
 func (p *HotelsNGProvider) TestConnection(ctx context.Context) error { return nil }
 
 type WakanowProvider struct{ name, code string }
+
 func (p *WakanowProvider) Name() string { return p.name }
 func (p *WakanowProvider) PushRates(ctx context.Context, req *RatePushRequest) (*SyncResponse, error) {
 	return &SyncResponse{Success: true, SyncedItems: len(req.Rates)}, nil
@@ -980,6 +988,7 @@ func (p *WakanowProvider) GetMappingStatus(ctx context.Context) (*MappingStatus,
 func (p *WakanowProvider) TestConnection(ctx context.Context) error { return nil }
 
 type DirectBookingProvider struct{ name, code string }
+
 func (p *DirectBookingProvider) Name() string { return p.name }
 func (p *DirectBookingProvider) PushRates(ctx context.Context, req *RatePushRequest) (*SyncResponse, error) {
 	return &SyncResponse{Success: true, SyncedItems: len(req.Rates)}, nil
@@ -1002,6 +1011,7 @@ func (p *DirectBookingProvider) GetMappingStatus(ctx context.Context) (*MappingS
 func (p *DirectBookingProvider) TestConnection(ctx context.Context) error { return nil }
 
 type MockOTAProvider struct{ name, code string }
+
 func (p *MockOTAProvider) Name() string { return p.name }
 func (p *MockOTAProvider) PushRates(ctx context.Context, req *RatePushRequest) (*SyncResponse, error) {
 	return &SyncResponse{Success: true, SyncedItems: len(req.Rates)}, nil

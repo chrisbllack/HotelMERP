@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"infineon/internal/auth"
+	"infineon/internal/channelmanager"
 	"infineon/internal/config"
 	"infineon/internal/database"
 	"infineon/internal/events"
@@ -98,6 +99,17 @@ func New(cfg *config.Config, db database.Pool, staticFiles fs.FS) http.Handler {
 			}
 			outbox.Schedule(id)
 		})
+	}
+
+	// Channel manager (OTA connectivity: Booking.com, Expedia, Airbnb, ...).
+	// Like payments it needs the raw SQL handle; on a backend without one the
+	// feature stays disabled and the /channels endpoints answer 503 instead of
+	// panicking. Seeding is idempotent and safe on every boot.
+	if sqldb, ok := db.(interface{ RawDB() *sql.DB }); ok {
+		cm := channelmanager.NewChannelManager(sqldb.RawDB())
+		cm.SeedChannelData(context.Background(), "00000000-0000-0000-0000-000000000001")
+		handler.SetChannelManager(cm)
+		log.Printf("[server] Channel manager initialized (OTA channels seeded)")
 	}
 
 	// Serve static files if provided
