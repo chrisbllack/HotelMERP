@@ -2,15 +2,40 @@ import { Card, CardHeader, StatCard, Badge, Table, Td } from "../components/ui/p
 import { PageHeader } from "../components/ui/primitives";
 import { usePlatform } from "../store/platform";
 import { useAuth } from "../auth/auth";
+import { useConvexQuery } from "../lib/live";
+import { api } from "../convex/_generated/api";
 import { guests, posOrders, posOrderLines, eventBookings, hardwareDevices, PROPERTY, rooms as seedRooms } from "../data/demo";
 import { naira, num, ROOM_STATUS, todayISO } from "../lib/utils";
 import { ROLE_LABELS } from "../types";
 import { Link } from "react-router-dom";
-import { AlertTriangle, ArrowRight, Bell, Building2, CalendarDays, Radio, Sun } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bell, Building2, CalendarDays, Radio, Sun, Wifi, WifiOff } from "lucide-react";
+
+/** Live payload shape from api.reports.dashboard (money in kobo). */
+interface LiveDashboard {
+  date: string;
+  property: { name: string };
+  rooms: { total: number; outOfOrder: number; sellable: number; occupied: number; dirty: number };
+  kpi: { occupancyPct: number; adrKobo: number; revparKobo: number; roomRevenueKobo: number };
+  arrivals: { count: number };
+  departures: { count: number };
+  inHouse: { count: number };
+  housekeeping: { pending: number };
+  maintenance: { open: number };
+  inventory: { low: number };
+  finance: { outstandingKobo: number; collectionsTodayKobo: number; collectionsMtdKobo: number };
+  fnb: { ordersToday: number; revenueTodayKobo: number };
+  nightAudit: { lastClosedDate: string | null; open: boolean };
+}
+
+const K = (kobo: number) => kobo / 100; // kobo → naira for formatting
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, token, isLive } = useAuth();
   const { rooms, reservations, tasks } = usePlatform();
+
+  // Live cross-module aggregates from the backend; undefined while loading or
+  // when the backend is offline — the demo store covers both cases.
+  const dash = useConvexQuery<LiveDashboard>(api.reports.dashboard, token ? { token } : null);
 
   const inHouse = reservations.filter((r) => r.status === "checked_in");
   const arrivalsToday = reservations.filter((r) => r.status === "confirmed" && r.arrivalDate <= todayISO);
@@ -29,6 +54,21 @@ export default function DashboardPage() {
   const eventRevenue = eventBookings.filter((e) => e.status === "confirmed").reduce((a, e) => a + e.totalAmount, 0);
   const deviceAlerts = hardwareDevices.filter((d) => d.status !== "online");
 
+  // Live values win when present; store-derived values remain the fallback.
+  const dOccupancy = dash ? dash.kpi.occupancyPct : occupancy;
+  const dOccupied = dash ? dash.rooms.occupied : occupied;
+  const dSellable = dash ? dash.rooms.sellable : sellable;
+  const dAdr = dash ? K(dash.kpi.adrKobo) : adr;
+  const dRevpar = dash ? K(dash.kpi.revparKobo) : revpar;
+  const dRoomRevenue = dash ? K(dash.kpi.roomRevenueKobo) : roomRevenue;
+  const dFnBRevenue = dash ? K(dash.fnb.revenueTodayKobo) : posToday;
+  const dArrivals = dash ? dash.arrivals.count : arrivalsToday.length;
+  const dDepartures = dash ? dash.departures.count : departuresToday.length;
+  const dInHouse = dash ? dash.inHouse.count : inHouse.length;
+  const dDirty = dash ? dash.rooms.dirty : dirtyCount;
+  const dHkPending = dash ? dash.housekeeping.pending : pendingTasks;
+  const dNightClosed = dash?.nightAudit.lastClosedDate ?? null;
+
   const statusCounts = Object.keys(ROOM_STATUS).map((s) => ({
     status: s,
     count: rooms.filter((r) => r.status === s).length,
@@ -42,7 +82,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <PageHeader
         title="Executive Dashboard"
-        subtitle={`${PROPERTY.name} · business date 5 Sep 2026 · all figures local, offline-capable`}
+        subtitle={`${dash?.property.name ?? PROPERTY.name} · business date ${dash?.date ?? "5 Sep 2026"} · ${isLive && dash ? "live figures from the property backend" : "local demo figures (backend offline)"}`}
       />
 
       {/* Welcome band */}
@@ -64,10 +104,10 @@ export default function DashboardPage() {
               Good to see you, {firstName}.
             </h2>
             <p className="mt-1.5 max-w-2xl text-sm text-brand-100/75">
-              Here's how the property is performing today. <span className="text-brand-50/90">{arrivalsToday.length}</span> arrivals,
-              <span className="text-brand-50/90"> {departuresToday.length}</span> departures, and
-              <span className="text-brand-50/90"> {inHouse.length}</span> in-house guests — occupancy at
-              <span className="ml-1 inline-flex items-center rounded-md bg-gold-500/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-300">{occupancy}%</span>.
+              Here's how the property is performing today. <span className="text-brand-50/90">{dArrivals}</span> arrivals,
+              <span className="text-brand-50/90"> {dDepartures}</span> departures, and
+              <span className="text-brand-50/90"> {dInHouse}</span> in-house guests — occupancy at
+              <span className="ml-1 inline-flex items-center rounded-md bg-gold-500/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-300">{dOccupancy}%</span>.
             </p>
             <div className="mt-5 flex flex-wrap items-center gap-2.5">
               <Link
@@ -89,11 +129,18 @@ export default function DashboardPage() {
           </div>
           <div className="flex flex-row gap-3 sm:flex-col sm:items-end">
             <span className="inline-flex items-center gap-2 rounded-md border border-brand-700/60 bg-brand-950/40 px-3 py-2 text-[11px] text-brand-100/80 backdrop-blur">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse-dot" />
-              All systems nominal
+              {isLive && dash ? (
+                <>
+                  <Wifi size={11} className="text-emerald-300" /> Live · backend synced
+                </>
+              ) : (
+                <>
+                  <WifiOff size={11} className="text-amber-300" /> Demo mode · backend offline
+                </>
+              )}
             </span>
             <span className="inline-flex items-center gap-2 rounded-md border border-brand-700/60 bg-brand-950/40 px-3 py-2 text-[11px] text-brand-100/80 backdrop-blur">
-              <Bell size={11} className="text-gold-400" /> {deviceAlerts.length + pendingTasks} open attention items
+              <Bell size={11} className="text-gold-400" /> {deviceAlerts.length + dHkPending + (dash ? dash.maintenance.open + dash.inventory.low : pendingTasks)} open attention items
             </span>
             <span className="inline-flex items-center gap-2 rounded-md border border-brand-700/60 bg-brand-950/40 px-3 py-2 text-[11px] text-brand-100/80 backdrop-blur">
               {roleLabel}
@@ -103,10 +150,10 @@ export default function DashboardPage() {
       </section>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Occupancy" value={`${occupancy}%`} sub={`${occupied} of ${sellable} sellable rooms`} accent="gold" />
-        <StatCard label="ADR" value={naira(adr, true)} sub="average daily rate" />
-        <StatCard label="RevPAR" value={naira(revpar, true)} sub="revenue per available room" />
-        <StatCard label="Today's Revenue" value={naira(roomRevenue + posToday, true)} sub={`Rooms ${naira(roomRevenue, true)} · F&B ${naira(posToday, true)}`} accent="emerald" />
+        <StatCard label="Occupancy" value={`${dOccupancy}%`} sub={`${dOccupied} of ${dSellable} sellable rooms`} accent="gold" />
+        <StatCard label="ADR" value={naira(dAdr, true)} sub="average daily rate" />
+        <StatCard label="RevPAR" value={naira(dRevpar, true)} sub="revenue per available room" />
+        <StatCard label="Today's Revenue" value={naira(dRoomRevenue + dFnBRevenue, true)} sub={`Rooms ${naira(dRoomRevenue, true)} · F&B ${naira(dFnBRevenue, true)}`} accent="emerald" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -121,17 +168,34 @@ export default function DashboardPage() {
             }
           />
           <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-4">
-            {statusCounts
-              .filter((s) => s.count > 0)
-              .map((s) => (
-                <div key={s.status} className="rounded-lg border border-brand-800/70 bg-brand-950/50 px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className={`h-2 w-2 rounded-full ${ROOM_STATUS[s.status].dot}`} />
-                    <p className="text-[11px] text-brand-200/70">{ROOM_STATUS[s.status].label}</p>
-                  </div>
-                  <p className="mt-1 font-display text-xl text-brand-50">{s.count}</p>
-                </div>
-              ))}
+            {dash
+              ? [
+                  { label: "Occupied", count: dash.rooms.occupied, dot: ROOM_STATUS.occupied_clean?.dot ?? "bg-amber-400" },
+                  { label: "Dirty (awaiting HK)", count: dash.rooms.dirty, dot: "bg-rose-400" },
+                  { label: "Out of order", count: dash.rooms.outOfOrder, dot: ROOM_STATUS.out_of_order?.dot ?? "bg-slate-400" },
+                  { label: "Sellable today", count: dash.rooms.sellable, dot: "bg-emerald-400" },
+                ]
+                  .filter((s) => s.count > 0)
+                  .map((s) => (
+                    <div key={s.label} className="rounded-lg border border-brand-800/70 bg-brand-950/50 px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${s.dot}`} />
+                        <p className="text-[11px] text-brand-200/70">{s.label}</p>
+                      </div>
+                      <p className="mt-1 font-display text-xl text-brand-50">{s.count}</p>
+                    </div>
+                  ))
+              : statusCounts
+                  .filter((s) => s.count > 0)
+                  .map((s) => (
+                    <div key={s.status} className="rounded-lg border border-brand-800/70 bg-brand-950/50 px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${ROOM_STATUS[s.status].dot}`} />
+                        <p className="text-[11px] text-brand-200/70">{ROOM_STATUS[s.status].label}</p>
+                      </div>
+                      <p className="mt-1 font-display text-xl text-brand-50">{s.count}</p>
+                    </div>
+                  ))}
           </div>
         </Card>
 
@@ -141,7 +205,7 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-brand-200/60">Arrivals (expected)</p>
-                <p className="font-display text-2xl text-brand-50">{arrivalsToday.length}</p>
+                <p className="font-display text-2xl text-brand-50">{dArrivals}</p>
               </div>
               <Link to="/front-desk" className="rounded-lg border border-brand-700 px-3 py-1.5 text-xs text-brand-100 hover:border-brand-500">
                 Open front desk
@@ -150,19 +214,19 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-brand-200/60">In-house guests</p>
-                <p className="font-display text-2xl text-brand-50">{inHouse.length}</p>
+                <p className="font-display text-2xl text-brand-50">{dInHouse}</p>
               </div>
             </div>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-brand-200/60">Departures due</p>
-                <p className="font-display text-2xl text-brand-50">{departuresToday.length}</p>
+                <p className="font-display text-2xl text-brand-50">{dDepartures}</p>
               </div>
             </div>
             <div className="flex items-center justify-between border-t border-brand-800/70 pt-3">
               <div>
                 <p className="text-xs text-brand-200/60">Housekeeping load</p>
-                <p className="text-sm text-brand-100">{dirtyCount} dirty rooms · {pendingTasks} open tasks</p>
+                <p className="text-sm text-brand-100">{dDirty} dirty rooms · {dHkPending} open tasks</p>
               </div>
               <Link to="/housekeeping" className="text-xs font-medium text-gold-400 hover:text-gold-300">
                 Board
@@ -176,8 +240,8 @@ export default function DashboardPage() {
         <Card>
           <CardHeader title="F&B Pulse" subtitle="Point of sale across all outlets" action={<Link to="/pos" className="text-xs font-medium text-gold-400 hover:text-gold-300">POS terminal</Link>} />
           <Table head={["Metric", "Value"]}>
-            <tr><Td>F&B revenue today</Td><Td>{naira(posToday)}</Td></tr>
-            <tr><Td>Open orders</Td><Td>{posOrders.filter((o) => o.status === "open").length}</Td></tr>
+            <tr><Td>F&B revenue today</Td><Td>{naira(dFnBRevenue)}</Td></tr>
+            <tr><Td>Open orders</Td><Td>{dash ? dash.fnb.ordersToday : posOrders.filter((o) => o.status === "open").length}{dash ? " settled today" : ""}</Td></tr>
             <tr><Td>Items served (covers)</Td><Td>{num(covers)}</Td></tr>
             <tr><Td>Awaiting payment</Td><Td>{posOrders.filter((o) => o.paymentStatus === "pending").length} orders</Td></tr>
           </Table>
@@ -206,8 +270,13 @@ export default function DashboardPage() {
               </li>
             ))}
             <li className="flex items-center gap-3 px-5 py-3">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse-dot" />
-              <span className="text-sm text-brand-100/90">Night audit scheduled 02:00 · last run 2026-09-04 clean</span>
+              <span className={`h-1.5 w-1.5 rounded-full ${dNightClosed ? "bg-emerald-400 animate-pulse-dot" : "bg-amber-400"}`} />
+              <span className="text-sm text-brand-100/90">
+                {dNightClosed
+                  ? `Night audit · business date ${dNightClosed} closed${dash?.nightAudit.open ? " · today's close pending" : ""}`
+                  : "Night audit scheduled 02:00 · last run 2026-09-04 clean"}
+              </span>
+              <Link to="/night-audit" className="ml-auto text-xs text-gold-400 hover:text-gold-300">Audit</Link>
             </li>
           </ul>
         </Card>

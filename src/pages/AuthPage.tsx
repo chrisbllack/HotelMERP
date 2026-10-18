@@ -49,7 +49,7 @@ export default function AuthPage() {
     setSubmitting(true);
     // Tiny visual delay so the loading state reads on the button.
     await new Promise((r) => setTimeout(r, 250));
-    const result = login(email, password);
+    const result = await login(email, password);
     setSubmitting(false);
     if (result.ok) {
       navigate(destination, { replace: true });
