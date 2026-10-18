@@ -12,7 +12,24 @@ export default defineSchema({
   users: defineTable({
     email: v.string(),
     name: v.string(),
+    // PBKDF2-SHA256 encoded hash ("pbkdf2$iterations$salt$hash"). Absent only
+    // for legacy demo accounts before their first password-verified login.
+    passwordHash: v.optional(v.string()),
   }).index("by_email", ["email"]),
+
+  // Server-side sessions for the console (M-SEC). Only the SHA-256 of the
+  // bearer token is stored; the raw token lives in the client.
+  sessions: defineTable({
+    userId: v.id("users"),
+    tokenHash: v.string(),
+    roleKey: v.string(),
+    propertyId: v.optional(v.id("properties")),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    lastSeenAt: v.number(),
+  })
+    .index("by_token", ["tokenHash"])
+    .index("by_user", ["userId"]),
 
   // ── M-PLT Platform core ────────────────────────────────────────────────
   counters: defineTable({
@@ -86,6 +103,26 @@ export default defineSchema({
   })
     .index("by_property", ["propertyId"])
     .index("by_property_at", ["propertyId", "at"]),
+
+  // Cross-module domain event log (ADR-0006 contract bus). Every module
+  // publishes here; subscribers are dispatched asynchronously (transactional
+  // outbox) so producers never couple to consumers.
+  domainEvents: defineTable({
+    propertyId: v.id("properties"),
+    type: v.string(), // reservation.checked_out, folio.charge_posted, stock.low …
+    source: v.string(), // module that published the event
+    entityId: v.optional(v.string()),
+    payload: v.any(),
+    status: v.string(), // pending, delivered, failed
+    attempts: v.number(),
+    error: v.optional(v.string()),
+    emittedBy: v.optional(v.string()),
+    at: v.number(),
+    dispatchedAt: v.optional(v.number()),
+  })
+    .index("by_property_at", ["propertyId", "at"])
+    .index("by_property_type", ["propertyId", "type"])
+    .index("by_status", ["status"]),
 
   // ── M-SEC Security & staff ─────────────────────────────────────────────
   staff: defineTable({
@@ -469,6 +506,19 @@ export default defineSchema({
   })
     .index("by_property", ["propertyId"])
     .index("by_guest", ["guestId"]),
+
+  // Append-only loyalty point movements — every balance change is traceable.
+  loyaltyLedger: defineTable({
+    propertyId: v.id("properties"),
+    guestId: v.id("guests"),
+    reservationId: v.optional(v.id("reservations")),
+    delta: v.number(),
+    reason: v.string(), // stay, welcome, redemption, adjustment
+    balanceAfter: v.number(),
+    at: v.number(),
+  })
+    .index("by_guest", ["guestId"])
+    .index("by_property", ["propertyId"]),
 
   campaigns: defineTable({
     propertyId: v.id("properties"),

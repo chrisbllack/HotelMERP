@@ -5,7 +5,7 @@
 
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
-import { internalQuery, internalMutation } from "./_generated/server";
+import { internalQuery, internalMutation, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 
@@ -297,3 +297,39 @@ export const primaryPropertyOrNull = internalQuery({
     return ctx.db.query("properties").withIndex("by_pk", (q) => q.eq("pk", SEED_PK)).unique() ?? null;
   },
 });
+
+/** Plain helper usable from queries, mutations and actions alike. */
+export async function primaryProperty(ctx: QueryCtx | MutationCtx): Promise<Doc<"properties"> | null> {
+  return (await ctx.db.query("properties").withIndex("by_pk", (q) => q.eq("pk", SEED_PK)).unique()) ?? null;
+}
+
+export async function requireProperty(ctx: QueryCtx | MutationCtx): Promise<Doc<"properties">> {
+  const property = await primaryProperty(ctx);
+  if (!property) throw new ConvexError("Property not initialised — run seed first");
+  return property;
+}
+
+// ── Timezone-aware local-day range helpers (revenue/stat windows) ────────
+function tzOffsetMs(utcMs: number, timezone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(new Date(utcMs));
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? "0");
+  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"), get("second"));
+  return asUtc - utcMs;
+}
+
+/** [start, end) UTC timestamps covering the local calendar day `iso`. */
+export function localDayRange(iso: string, timezone: string): [number, number] {
+  const guess = Date.parse(`${iso}T00:00:00Z`);
+  let start = guess - tzOffsetMs(guess, timezone);
+  start = guess - tzOffsetMs(start, timezone); // second pass for DST edges
+  return [start, start + 86_400_000];
+}
