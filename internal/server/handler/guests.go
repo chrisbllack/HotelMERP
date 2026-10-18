@@ -14,22 +14,22 @@ import (
 )
 
 type CreateGuestRequest struct {
-	FirstName         string `json:"first_name"`
-	LastName          string `json:"last_name"`
-	Email             string `json:"email"`
-	Phone             string `json:"phone"`
-	Nationality       string `json:"nationality"`
-	CountryID         string `json:"country_id"`
-	IDType            string `json:"id_type"`
-	IDNumber          string `json:"id_number"`
-	IDExpiry          string `json:"id_expiry"`
-	DateOfBirth       string `json:"date_of_birth"`
-	Gender            string `json:"gender"`
-	Address           string `json:"address"`
-	City              string `json:"city"`
-	Company           string `json:"company"`
-	Notes             string `json:"notes"`
-	MarketingConsent  bool   `json:"marketing_consent"`
+	FirstName        string `json:"first_name"`
+	LastName         string `json:"last_name"`
+	Email            string `json:"email"`
+	Phone            string `json:"phone"`
+	Nationality      string `json:"nationality"`
+	CountryID        string `json:"country_id"`
+	IDType           string `json:"id_type"`
+	IDNumber         string `json:"id_number"`
+	IDExpiry         string `json:"id_expiry"`
+	DateOfBirth      string `json:"date_of_birth"`
+	Gender           string `json:"gender"`
+	Address          string `json:"address"`
+	City             string `json:"city"`
+	Company          string `json:"company"`
+	Notes            string `json:"notes"`
+	MarketingConsent bool   `json:"marketing_consent"`
 }
 
 func (h *Handler) ListGuests(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +78,7 @@ func (h *Handler) ListGuests(w http.ResponseWriter, r *http.Request) {
 
 	var guests []map[string]interface{}
 	for rows.Next() {
-		var id uuid.UUID
+		var id string
 		var firstName, lastName string
 		var email, phone, nationality, idType, idNumber, dob, gender, company, city *string
 		var createdAt interface{}
@@ -304,7 +304,7 @@ func (h *Handler) GuestSearch(w http.ResponseWriter, r *http.Request) {
 
 	var results []map[string]interface{}
 	for rows.Next() {
-		var id uuid.UUID
+		var id string
 		var firstName, lastName string
 		var email, phone, idType, idNumber *string
 		rows.Scan(&id, &firstName, &lastName, &email, &phone, &idType, &idNumber)

@@ -1,8 +1,8 @@
 package handler
 
 import (
+	context "context"
 	"encoding/json"
-context"context"
 	"fmt"
 	"log"
 	"math"
@@ -138,12 +138,11 @@ func (h *Handler) ListRoles(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) OpenShift(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
 
 	var req struct {
-		CashierID     string  `json:"cashier_id"`
-		OpeningCash   float64 `json:"opening_cash"`
-		POSOutlet     string  `json:"pos_outlet"`
+		CashierID   string  `json:"cashier_id"`
+		OpeningCash float64 `json:"opening_cash"`
+		POSOutlet   string  `json:"pos_outlet"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondJSON(w, 400, map[string]interface{}{"error": "Invalid request body"})
@@ -180,14 +179,13 @@ func (h *Handler) OpenShift(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CloseShift(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
 
 	var req struct {
-		ShiftID      string  `json:"shift_id"`
-		ClosingCash  float64 `json:"closing_cash"`
-		CardTotal    float64 `json:"card_total"`
+		ShiftID       string  `json:"shift_id"`
+		ClosingCash   float64 `json:"closing_cash"`
+		CardTotal     float64 `json:"card_total"`
 		TransferTotal float64 `json:"transfer_total"`
-		Notes        string  `json:"notes"`
+		Notes         string  `json:"notes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondJSON(w, 400, map[string]interface{}{"error": "Invalid request body"})
@@ -243,7 +241,6 @@ func (h *Handler) CloseShift(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListCashShifts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
 
 	rows, err := h.db.Query(ctx, `
 		SELECT cs.id, cs.cashier_id, cs.opening_cash, cs.closing_cash, cs.expected_cash,
@@ -278,11 +275,10 @@ func (h *Handler) ListCashShifts(w http.ResponseWriter, r *http.Request) {
 // SplitFolio splits a folio into two
 func (h *Handler) SplitFolio(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
 
 	var req struct {
-		FolioID    string   `json:"folio_id"`
-		ChargeIDs  []string `json:"charge_ids"` // charges to move to new folio
+		FolioID   string   `json:"folio_id"`
+		ChargeIDs []string `json:"charge_ids"` // charges to move to new folio
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondJSON(w, 400, map[string]interface{}{"error": "Invalid request body"})
@@ -320,28 +316,58 @@ func (h *Handler) SplitFolio(w http.ResponseWriter, r *http.Request) {
 // TransferFolio transfers charges between folios
 func (h *Handler) TransferFolio(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+	propertyID := r.Header.Get("X-Property-ID")
 
 	var req struct {
-		ChargeIDs    []string `json:"charge_ids"`
-		TargetFolio  string   `json:"target_folio_id"`
+		ChargeIDs   []string `json:"charge_ids"`
+		TargetFolio string   `json:"target_folio_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondJSON(w, 400, map[string]interface{}{"error": "Invalid request body"})
 		return
 	}
+	if req.TargetFolio == "" || len(req.ChargeIDs) == 0 {
+		respondJSON(w, 400, map[string]interface{}{"error": "charge_ids and target_folio_id are required"})
+		return
+	}
 
+	// Target folio must belong to this property — transfers never cross
+	// the tenancy boundary.
+	var target string
+	if err := h.db.QueryRow(ctx, `
+		SELECT id::text FROM folios WHERE id = $1 AND property_id = $2
+	`, req.TargetFolio, propertyID).Scan(&target); err != nil {
+		respondJSON(w, 404, map[string]interface{}{"error": "Target folio not found"})
+		return
+	}
+
+	// Move the lines, remembering every folio touched so both sides of the
+	// transfer get their balances recomputed from the source of truth.
+	touched := map[string]bool{target: true}
 	transferred := 0
 	for _, chargeID := range req.ChargeIDs {
-		_, err := h.db.Exec(ctx, `UPDATE folio_charges SET folio_id=? WHERE id=?`, req.TargetFolio, chargeID)
-		if err == nil {
+		var src string
+		if err := h.db.QueryRow(ctx, `
+			SELECT folio_id::text FROM folio_lines WHERE id = $1 AND property_id = $2
+		`, chargeID, propertyID).Scan(&src); err != nil {
+			continue // unknown or foreign charge — skip
+		}
+		if _, err := h.db.Exec(ctx, `
+			UPDATE folio_lines SET folio_id = $1 WHERE id = $2 AND property_id = $3
+		`, target, chargeID, propertyID); err == nil {
 			transferred++
+			touched[src] = true
+		}
+	}
+	for fid := range touched {
+		if err := refreshFolioBalance(ctx, h.db, fid); err != nil {
+			log.Printf("[FOLIO] Balance refresh failed for %s: %v", fid, err)
 		}
 	}
 
-	log.Printf("[FOLIO] Transferred %d charges to %s", transferred, req.TargetFolio[:8])
+	log.Printf("[FOLIO] Transferred %d charges to %s", transferred, target[:8])
 	respondJSON(w, 200, map[string]interface{}{
-		"transferred": transferred, "target_folio": req.TargetFolio,
+		"transferred": transferred, "target_folio": target,
 	})
 }
 
@@ -351,7 +377,6 @@ func (h *Handler) TransferFolio(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateSeasonalRate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
 
 	var req struct {
 		RoomTypeID   string  `json:"room_type_id"`
@@ -360,7 +385,7 @@ func (h *Handler) CreateSeasonalRate(w http.ResponseWriter, r *http.Request) {
 		EndDate      string  `json:"end_date"`
 		BasePrice    float64 `json:"base_price"`
 		MinStay      int     `json:"min_stay_nights"`
-		TaxInclusive  bool    `json:"tax_inclusive"`
+		TaxInclusive bool    `json:"tax_inclusive"`
 		PlanCode     string  `json:"plan_code"` // BAR, CORP, OTA
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -393,14 +418,13 @@ func (h *Handler) CreateSeasonalRate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateBusinessSourceRate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
 
 	var req struct {
-		SourceID     string  `json:"source_id"` // company or travel agent ID
+		SourceID     string  `json:"source_id"`   // company or travel agent ID
 		SourceType   string  `json:"source_type"` // company, travel_agent, ota
 		RoomTypeID   string  `json:"room_type_id"`
 		RatePerNight float64 `json:"rate_per_night"`
-		TaxInclusive  bool    `json:"tax_inclusive"`
+		TaxInclusive bool    `json:"tax_inclusive"`
 		ValidFrom    string  `json:"valid_from"`
 		ValidTo      string  `json:"valid_to"`
 	}
@@ -434,7 +458,7 @@ func (h *Handler) CreateBusinessSourceRate(w http.ResponseWriter, r *http.Reques
 func (h *Handler) GetBestRate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
+
 	roomTypeID := r.URL.Query().Get("room_type_id")
 	checkIn := r.URL.Query().Get("check_in")
 	checkOut := r.URL.Query().Get("check_out")
@@ -507,16 +531,15 @@ func (h *Handler) GetBestRate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateCompanyProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
 
 	var req struct {
-		Name        string `json:"name"`
-		ContactName string `json:"contact_name"`
-		Email       string `json:"email"`
-		Phone       string `json:"phone"`
-		Address     string `json:"address"`
-		TaxID       string `json:"tax_id"`
-		PaymentTerm string `json:"payment_term"` // net30, net60, prepaid
+		Name        string  `json:"name"`
+		ContactName string  `json:"contact_name"`
+		Email       string  `json:"email"`
+		Phone       string  `json:"phone"`
+		Address     string  `json:"address"`
+		TaxID       string  `json:"tax_id"`
+		PaymentTerm string  `json:"payment_term"` // net30, net60, prepaid
 		CreditLimit float64 `json:"credit_limit"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -543,17 +566,16 @@ func (h *Handler) CreateCompanyProfile(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateTravelAgentProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
 
 	var req struct {
-		Name         string  `json:"name"`
-		ContactName  string  `json:"contact_name"`
-		Email        string  `json:"email"`
-		Phone        string  `json:"phone"`
-		Address      string  `json:"address"`
-		Commission   float64 `json:"commission_pct"` // e.g. 15%
-		PaymentTerm  string  `json:"payment_term"`
-		AgreementNo  string  `json:"agreement_number"`
+		Name        string  `json:"name"`
+		ContactName string  `json:"contact_name"`
+		Email       string  `json:"email"`
+		Phone       string  `json:"phone"`
+		Address     string  `json:"address"`
+		Commission  float64 `json:"commission_pct"` // e.g. 15%
+		PaymentTerm string  `json:"payment_term"`
+		AgreementNo string  `json:"agreement_number"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondJSON(w, 400, map[string]interface{}{"error": "Invalid request body"})
@@ -579,7 +601,6 @@ func (h *Handler) CreateTravelAgentProfile(w http.ResponseWriter, r *http.Reques
 func (h *Handler) ListCompanyProfiles(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
 
 	rows, err := h.db.Query(ctx,
 		`SELECT id, name, contact_name, email, phone, payment_term, credit_limit, status
@@ -610,7 +631,6 @@ func (h *Handler) ListCompanyProfiles(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) SearchReservations(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
 
 	query := r.URL.Query().Get("q")
 	status := r.URL.Query().Get("status")
@@ -664,7 +684,6 @@ func (h *Handler) SearchReservations(w http.ResponseWriter, r *http.Request) {
 // GroupCheckOut performs check-out for all rooms in a group booking
 func (h *Handler) GroupCheckOut(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
 
 	var req struct {
 		GroupID string `json:"group_id"`
@@ -693,7 +712,6 @@ func (h *Handler) GroupCheckOut(w http.ResponseWriter, r *http.Request) {
 // ProcessEarlyCheckIn handles early check-in with fee calculation
 func (h *Handler) ProcessEarlyCheckIn(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
 
 	var req struct {
 		ReservationID string  `json:"reservation_id"`
@@ -729,7 +747,6 @@ func (h *Handler) ProcessEarlyCheckIn(w http.ResponseWriter, r *http.Request) {
 // ProcessLateCheckOut handles late check-out with fee
 func (h *Handler) ProcessLateCheckOut(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
 
 	var req struct {
 		ReservationID string  `json:"reservation_id"`
@@ -762,7 +779,6 @@ func (h *Handler) ProcessLateCheckOut(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ProcessDayUse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
 
 	var req struct {
 		RoomTypeID string  `json:"room_type_id"`
@@ -796,7 +812,6 @@ func (h *Handler) ProcessDayUse(w http.ResponseWriter, r *http.Request) {
 // GenerateCardKey generates an electronic card key (simulated)
 func (h *Handler) GenerateCardKey(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
 
 	var req struct {
 		ReservationID string `json:"reservation_id"`
@@ -817,24 +832,23 @@ func (h *Handler) GenerateCardKey(w http.ResponseWriter, r *http.Request) {
 		req.ValidFrom, req.ValidTo, time.Now().UTC())
 
 	respondJSON(w, 201, map[string]interface{}{
-		"key_code":  keyCode,
-		"room":      req.RoomNumber,
+		"key_code":   keyCode,
+		"room":       req.RoomNumber,
 		"valid_from": req.ValidFrom,
-		"valid_to":  req.ValidTo,
-		"message":   "Electronic card key generated",
+		"valid_to":   req.ValidTo,
+		"message":    "Electronic card key generated",
 	})
 }
 
 // VoidReservation cancels a reservation with blacklisting check
 func (h *Handler) VoidReservation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
 
 	var req struct {
-		ReservationID string `json:"reservation_id"`
-		Reason        string `json:"reason"`
-		ApplyCancellationFee bool `json:"apply_cancellation_fee"`
-		CancellationFee float64 `json:"cancellation_fee"`
+		ReservationID        string  `json:"reservation_id"`
+		Reason               string  `json:"reason"`
+		ApplyCancellationFee bool    `json:"apply_cancellation_fee"`
+		CancellationFee      float64 `json:"cancellation_fee"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondJSON(w, 400, map[string]interface{}{"error": "Invalid request body"})
@@ -852,9 +866,9 @@ func (h *Handler) VoidReservation(w http.ResponseWriter, r *http.Request) {
 
 	if isBlacklisted {
 		respondJSON(w, 403, map[string]interface{}{
-			"error":        "GUEST BLACKLISTED",
-			"guest_name":   guestName,
-			"message":      "This guest is on the blacklist. Alert security.",
+			"error":      "GUEST BLACKLISTED",
+			"guest_name": guestName,
+			"message":    "This guest is on the blacklist. Alert security.",
 		})
 		return
 	}
@@ -888,18 +902,17 @@ func (h *Handler) VoidReservation(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateRetailSale(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
 
 	var req struct {
-		CustomerID  string `json:"customer_id"`
-		PriceLevel  int    `json:"price_level"` // 1-5
-		Items       []struct {
+		CustomerID string `json:"customer_id"`
+		PriceLevel int    `json:"price_level"` // 1-5
+		Items      []struct {
 			ProductID string  `json:"product_id"`
 			Quantity  int     `json:"quantity"`
 			Discount  float64 `json:"discount_pct"`
 			SerialNo  string  `json:"serial_number,omitempty"`
 		} `json:"items"`
-		PaymentMethod string `json:"payment_method"` // cash, card, transfer, mobile
+		PaymentMethod string  `json:"payment_method"` // cash, card, transfer, mobile
 		DepositAmount float64 `json:"deposit_amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -956,17 +969,16 @@ func (h *Handler) CreateRetailSale(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, 201, map[string]interface{}{
-		"sale_id":  saleID,
-		"total":    math.Round(totalAmount*100) / 100,
-		"deposit":  req.DepositAmount,
-		"balance":  math.Round((totalAmount-req.DepositAmount)*100) / 100,
+		"sale_id": saleID,
+		"total":   math.Round(totalAmount*100) / 100,
+		"deposit": req.DepositAmount,
+		"balance": math.Round((totalAmount-req.DepositAmount)*100) / 100,
 	})
 }
 
 // VoidSale voids a retail POS sale
 func (h *Handler) VoidSale(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
 
 	var req struct {
 		SaleID string `json:"sale_id"`
@@ -986,7 +998,7 @@ func (h *Handler) VoidSale(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetCustomerBalance(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	propertyID := getPropertyID(r)
-	
+
 	customerID := r.URL.Query().Get("customer_id")
 
 	var totalCharges, totalPayments float64
@@ -999,10 +1011,10 @@ func (h *Handler) GetCustomerBalance(w http.ResponseWriter, r *http.Request) {
 
 	balance := totalCharges - totalPayments
 	respondJSON(w, 200, map[string]interface{}{
-		"customer_id": customerID,
-		"total_charges": totalCharges,
+		"customer_id":    customerID,
+		"total_charges":  totalCharges,
 		"total_payments": totalPayments,
-		"balance": math.Round(balance*100) / 100,
+		"balance":        math.Round(balance*100) / 100,
 	})
 }
 
@@ -1010,7 +1022,6 @@ func (h *Handler) GetCustomerBalance(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ReprintReceipt(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	saleID := r.URL.Query().Get("sale_id")
-	
 
 	var total float64
 	var paymentMethod, status, createdAt string

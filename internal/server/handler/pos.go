@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -194,12 +195,12 @@ func (h *Handler) ListMenuItems(w http.ResponseWriter, r *http.Request) {
 // ── POS Orders ────────────────────────────────────────────
 
 type POSOrderRequest struct {
-	OutletID string         `json:"outlet_id"`
-	TableID  string         `json:"table_id"`
-	RoomID   string         `json:"room_id"` // for room charge
-	GuestStayID string      `json:"guest_stay_id"`
-	Items    []POSOrderItem `json:"items"`
-	Notes    string         `json:"notes"`
+	OutletID    string         `json:"outlet_id"`
+	TableID     string         `json:"table_id"`
+	RoomID      string         `json:"room_id"` // for room charge
+	GuestStayID string         `json:"guest_stay_id"`
+	Items       []POSOrderItem `json:"items"`
+	Notes       string         `json:"notes"`
 }
 
 type POSOrderItem struct {
@@ -235,7 +236,7 @@ func (h *Handler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 	// Calculate totals
 	var subtotal, taxTotal float64
 	for _, item := range req.Items {
-		lineTotal := item.Quantity * item.UnitPrice - item.Discount
+		lineTotal := item.Quantity*item.UnitPrice - item.Discount
 		subtotal += lineTotal
 	}
 
@@ -261,7 +262,7 @@ func (h *Handler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 
 	// Insert order items
 	for _, item := range req.Items {
-		lineTotal := item.Quantity * item.UnitPrice - item.Discount
+		lineTotal := item.Quantity*item.UnitPrice - item.Discount
 		tx.Exec(r.Context(), `
 			INSERT INTO pos_order_lines (id, order_id, menu_item_id, quantity, unit_price, discount, amount, notes)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -365,10 +366,17 @@ func (h *Handler) ClosePOSOrder(w http.ResponseWriter, r *http.Request) {
 			if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
 				createdBy = &claims.UserID
 			}
-			h.db.Exec(context.Background(), `
+			_, err := h.db.Exec(context.Background(), `
 				INSERT INTO folio_lines (id, folio_id, property_id, type, charge_code, description, amount, business_date, posted_by)
 				VALUES ($1, $2, $3, 'debit', 'RESTAURANT', 'Restaurant/Bar charge', $4, CURRENT_DATE, $5)
 			`, uuid.New(), folioID, propertyID, total, createdBy)
+			if err == nil {
+				if err := refreshFolioBalance(context.Background(), h.db, folioID.String()); err != nil {
+					log.Printf("[POS] Folio balance refresh failed for %s: %v", folioID.String(), err)
+				}
+			} else {
+				log.Printf("[POS] Folio charge post failed for %s: %v", folioID.String(), err)
+			}
 		}
 	}
 
@@ -483,10 +491,10 @@ func (h *Handler) CloseCashierShift(w http.ResponseWriter, r *http.Request) {
 	`, shiftID, req.ClosingBalance, expectedBalance, variance, req.Notes)
 
 	response.RespondSuccess(w, map[string]interface{}{
-		"shift_id":        shiftID,
-		"opening_float":   openingFloat,
+		"shift_id":         shiftID,
+		"opening_float":    openingFloat,
 		"expected_balance": expectedBalance,
-		"closing_balance": req.ClosingBalance,
-		"variance":        variance,
+		"closing_balance":  req.ClosingBalance,
+		"variance":         variance,
 	}, "Cashier shift closed successfully")
 }

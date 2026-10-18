@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 
 	"infineon/internal/api"
@@ -8,6 +9,22 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// scopeContext pins a request to a property scope. Besides the typed
+// api.PropertyID scope it also exposes the legacy string context keys
+// ("property_id", "user_id") that a number of handlers still read directly.
+// Without them those handlers silently saw a nil tenant and either scanned
+// no rows or panicked on the unguarded type assertion.
+func scopeContext(ctx context.Context, propertyID, userID uuid.UUID) context.Context {
+	if propertyID != uuid.Nil {
+		ctx = api.WithPropertyID(ctx, propertyID)
+		ctx = context.WithValue(ctx, "property_id", propertyID.String())
+	}
+	if userID != uuid.Nil {
+		ctx = context.WithValue(ctx, "user_id", userID.String())
+	}
+	return ctx
+}
 
 // PropertyScope pins request tenancy to the JWT. The X-Property-ID header is
 // verified against the caller's claims before any handler runs, and injected
@@ -30,7 +47,7 @@ func PropertyScope() func(http.Handler) http.Handler {
 			if claims.PropertyID != uuid.Nil {
 				if raw == "" {
 					r.Header.Set("X-Property-ID", claims.PropertyID.String())
-					ctx := api.WithPropertyID(r.Context(), claims.PropertyID)
+					ctx := scopeContext(r.Context(), claims.PropertyID, claims.UserID)
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
@@ -47,7 +64,7 @@ func PropertyScope() func(http.Handler) http.Handler {
 						http.StatusForbidden)
 					return
 				}
-				ctx := api.WithPropertyID(r.Context(), propertyUUID)
+				ctx := scopeContext(r.Context(), propertyUUID, claims.UserID)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -55,11 +72,11 @@ func PropertyScope() func(http.Handler) http.Handler {
 			// Unscoped (super-admin) token: propagate when parseable so the
 			// context scope exists for downstream subsystems.
 			if propertyUUID, err := uuid.Parse(raw); err == nil {
-				ctx := api.WithPropertyID(r.Context(), propertyUUID)
+				ctx := scopeContext(r.Context(), propertyUUID, claims.UserID)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(scopeContext(r.Context(), uuid.Nil, claims.UserID)))
 		})
 	}
 }

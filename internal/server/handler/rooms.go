@@ -15,19 +15,19 @@ import (
 // ── Room Types ──────────────────────────────────────────────
 
 type CreateRoomTypeRequest struct {
-	Code           string  `json:"code"`
-	Name           string  `json:"name"`
-	Description    string  `json:"description"`
-	MaxOccupancy   int     `json:"max_occupancy"`
-	AdultCapacity  int     `json:"adult_capacity"`
-	ChildCapacity  int     `json:"child_capacity"`
-	BedConfig      string  `json:"bed_configuration"`
-	RoomSize       float64 `json:"room_size"`
-	View           string  `json:"view"`
-	BaseRate       float64 `json:"base_rate"`
-	MinRate        float64 `json:"min_rate"`
-	MaxRate        float64 `json:"max_rate"`
-	Status         string  `json:"status"`
+	Code          string  `json:"code"`
+	Name          string  `json:"name"`
+	Description   string  `json:"description"`
+	MaxOccupancy  int     `json:"max_occupancy"`
+	AdultCapacity int     `json:"adult_capacity"`
+	ChildCapacity int     `json:"child_capacity"`
+	BedConfig     string  `json:"bed_configuration"`
+	RoomSize      float64 `json:"room_size"`
+	View          string  `json:"view"`
+	BaseRate      float64 `json:"base_rate"`
+	MinRate       float64 `json:"min_rate"`
+	MaxRate       float64 `json:"max_rate"`
+	Status        string  `json:"status"`
 }
 
 func (h *Handler) ListRoomTypes(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +50,7 @@ func (h *Handler) ListRoomTypes(w http.ResponseWriter, r *http.Request) {
 
 	var roomTypes []map[string]interface{}
 	for rows.Next() {
-		var id uuid.UUID
+		var id string
 		var code, name, status string
 		var description, bedConfig, view *string
 		var maxOcc, adultCap, childCap, sortOrder int
@@ -231,12 +231,12 @@ func (h *Handler) DeleteRoomType(w http.ResponseWriter, r *http.Request) {
 // ── Rooms ──────────────────────────────────────────────────
 
 type CreateRoomRequest struct {
-	RoomTypeID    string `json:"room_type_id"`
-	Number        string `json:"number"`
-	BuildingID    string `json:"building_id"`
-	FloorID       string `json:"floor_id"`
-	IsSmoking     bool   `json:"is_smoking"`
-	Status        string `json:"status"`
+	RoomTypeID string `json:"room_type_id"`
+	Number     string `json:"number"`
+	BuildingID string `json:"building_id"`
+	FloorID    string `json:"floor_id"`
+	IsSmoking  bool   `json:"is_smoking"`
+	Status     string `json:"status"`
 }
 
 func (h *Handler) ListRooms(w http.ResponseWriter, r *http.Request) {
@@ -295,7 +295,8 @@ func (h *Handler) ListRooms(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	var rooms []map[string]interface{}
-	for rows.Next() {		var id, roomTypeID, number, roomStatus, hkStatus, maintStatus string
+	for rows.Next() {
+		var id, roomTypeID, number, roomStatus, hkStatus, maintStatus string
 		var isSmoking interface{}
 
 		var roomTypeName string
@@ -367,9 +368,9 @@ func (h *Handler) GetRoom(w http.ResponseWriter, r *http.Request) {
 
 	var number, roomStatus, hkStatus, maintStatus string
 	var isSmoking bool
-	var roomTypeID uuid.UUID
+	var roomTypeID string
 	var roomTypeName string
-	var buildingID, floorID *uuid.UUID
+	var buildingID, floorID *string
 
 	err := h.db.QueryRow(context.Background(), `
 		SELECT r.number, r.status, r.housekeeping_status, r.maintenance_status, r.is_smoking,

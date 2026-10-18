@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"infineon/internal/auth"
+	"infineon/internal/database"
 	"infineon/internal/events"
 	"infineon/internal/ledger"
 	"infineon/internal/response"
@@ -138,9 +139,9 @@ func (h *Handler) ListReservations(w http.ResponseWriter, r *http.Request) {
 
 	var reservations []map[string]interface{}
 	for rows.Next() {
-		var id, guestID, roomTypeID uuid.UUID
+		var id, guestID, roomTypeID string
 		var confirmationNumber, guestName, roomTypeName, status, source string
-		var roomID, roomNumber *uuid.UUID
+		var roomID, roomNumber *string
 		var arrivalDate, departureDate time.Time
 		var nights, adults, children int
 		var depositAmount, totalEstimate float64
@@ -290,8 +291,8 @@ func (h *Handler) GetReservation(w http.ResponseWriter, r *http.Request) {
 	propertyID := r.Header.Get("X-Property-ID")
 
 	var confirmationNumber, status, source, currency string
-	var guestID, roomTypeID uuid.UUID
-	var roomID *uuid.UUID
+	var guestID, roomTypeID, ratePlanID string
+	var roomID *string
 	var guestName, roomTypeName string
 	var arrivalDate, departureDate time.Time
 	var nights, adults, children, roomCount int
@@ -312,7 +313,7 @@ func (h *Handler) GetReservation(w http.ResponseWriter, r *http.Request) {
 		JOIN room_types rt ON res.room_type_id = rt.id
 		WHERE res.id = $1 AND res.property_id = $2 AND res.deleted_at IS NULL
 	`, id, propertyID).Scan(&confirmationNumber, &guestID, &guestName,
-		&uuid.UUID{}, &roomTypeID, &roomTypeName, &roomID,
+		&ratePlanID, &roomTypeID, &roomTypeName, &roomID,
 		&arrivalDate, &departureDate, &nights, &adults, &children, &roomCount,
 		&source, &status, &depositAmount, &depositPaid, &totalEstimate,
 		&currency, &exchangeRate, &specialRequests, &internalNotes,
@@ -555,7 +556,7 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	var nights, adults, children int
 	var arrivalDate time.Time
 	var depositAmount, depositPaid float64
-	var roomID *uuid.UUID
+	var roomID *string
 	var isVIP bool
 
 	err := h.db.QueryRow(context.Background(), `
@@ -578,7 +579,7 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	// Determine room
 	assignRoomID := req.RoomID
 	if assignRoomID == "" && roomID != nil {
-		assignRoomID = roomID.String()
+		assignRoomID = *roomID
 	}
 	if assignRoomID == "" {
 		response.RespondError(w, "Room ID is required for check-in", http.StatusBadRequest)
@@ -659,12 +660,12 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 
 	// Post initial charges (first night room charge + taxes)
 	var basePrice float64
-	h.db.QueryRow(r.Context(), "SELECT base_price FROM rate_plans WHERE id = $1", ratePlanID).Scan(&basePrice)
+	tx.QueryRow(r.Context(), "SELECT base_price FROM rate_plans WHERE id = $1", ratePlanID).Scan(&basePrice)
 
 	// Get tax rate
 	var taxRate float64
-	h.db.QueryRow(r.Context(), `
-		SELECT COALESCE(rt.tax_rate, 0) FROM rate_plans rp 
+	tx.QueryRow(r.Context(), `
+		SELECT COALESCE(rt.rate, 0) FROM rate_plans rp 
 		LEFT JOIN tax_rates rt ON rp.tax_rate_id = rt.id 
 		WHERE rp.id = $1
 	`, ratePlanID).Scan(&taxRate)
@@ -679,6 +680,10 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	`, uuid.New(), folioID, propertyID, roomCharge, roomCharge, taxAmount, createdBy)
 	if err != nil {
 		response.RespondError(w, "Failed to post room charge", http.StatusInternalServerError)
+		return
+	}
+	if err := refreshFolioBalance(r.Context(), tx, folioID.String()); err != nil {
+		response.RespondError(w, "Failed to update folio balance", http.StatusInternalServerError)
 		return
 	}
 
@@ -742,6 +747,9 @@ type CheckOutRequest struct {
 	PaymentAmount float64 `json:"payment_amount"`
 	PaymentRef    string  `json:"payment_ref"`
 	Notes         string  `json:"notes"`
+	// Force closes the folio with an outstanding balance (finance settles
+	// forced balances through adjustments/write-offs afterwards).
+	Force bool `json:"force"`
 }
 
 func (h *Handler) CheckOut(w http.ResponseWriter, r *http.Request) {
@@ -760,7 +768,7 @@ func (h *Handler) CheckOut(w http.ResponseWriter, r *http.Request) {
 	var nights int
 
 	err := h.db.QueryRow(context.Background(), `
-		SELECT res.status, res.room_id::text, res.guest_id::text, gs.id::text, f.id::text, f.folio_number, f.balance, res.nights
+		SELECT res.status, res.room_id::text, res.guest_id::text, gs.id::text, f.id::text, f.folio_number, `+liveFolioBalanceSQL+`, res.nights
 		FROM reservations res
 		JOIN guest_stays gs ON gs.reservation_id = res.id
 		JOIN folios f ON f.guest_stay_id = gs.id
@@ -775,6 +783,17 @@ func (h *Handler) CheckOut(w http.ResponseWriter, r *http.Request) {
 
 	if currentStatus != "checked_in" && currentStatus != "in_house" {
 		response.RespondError(w, "Reservation is not in-house", http.StatusConflict)
+		return
+	}
+
+	// Settlement gate: the folio must be even at check-out unless the
+	// operator explicitly forces it. A payment posted with this very
+	// request counts toward the settlement.
+	outstanding := balance - req.PaymentAmount
+	if outstanding > 0.005 && !req.Force {
+		response.RespondError(w, fmt.Sprintf(
+			"Folio %s has ₦%.2f outstanding after a ₦%.2f payment — settle it or resend with \"force\": true",
+			folioNumber, outstanding, req.PaymentAmount), http.StatusConflict)
 		return
 	}
 
@@ -828,6 +847,12 @@ func (h *Handler) CheckOut(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Final stored balance so the closed folio reports the settled figure.
+	if err := refreshFolioBalance(r.Context(), tx, folioID); err != nil {
+		response.RespondError(w, "Failed to update folio balance", http.StatusInternalServerError)
+		return
+	}
+
 	// Close folio
 	tx.Exec(r.Context(), `
 		UPDATE folios SET status = 'closed', closed_at = NOW(), updated_at = NOW() WHERE id = $1
@@ -845,10 +870,9 @@ func (h *Handler) CheckOut(w http.ResponseWriter, r *http.Request) {
 	`, id)
 
 	// Update room status to vacant_dirty
-	roomUUID, _ := uuid.Parse(roomID)
 	tx.Exec(r.Context(), `
 		UPDATE rooms SET status = 'vacant_dirty', status_changed_at = NOW(), updated_at = NOW() WHERE id = $1
-	`, roomUUID)
+	`, roomID)
 
 	// Record status history
 	tx.Exec(r.Context(), `
@@ -901,6 +925,38 @@ func (h *Handler) CheckOut(w http.ResponseWriter, r *http.Request) {
 
 // ── Folio ─────────────────────────────────────────────────
 
+// folioExecer is satisfied by both the pool and an open transaction.
+type folioExecer interface {
+	Exec(ctx context.Context, sql string, args ...any) (database.CommandTag, error)
+}
+
+// liveFolioBalanceSQL computes the folio balance from its lines at read
+// time: debits raise what the guest owes, credits (payments, adjustments)
+// reduce it. Voided lines are excluded — same rule as the folio listing.
+// The correlated subquery needs the queried folio aliased as `f`.
+const liveFolioBalanceSQL = `(SELECT COALESCE(SUM(CASE
+			WHEN fl.type = 'debit' AND fl.is_voided = FALSE THEN fl.amount
+			WHEN fl.type = 'credit' AND fl.is_voided = FALSE THEN -fl.amount
+			ELSE 0 END), 0)
+		FROM folio_lines fl WHERE fl.folio_id = f.id)`
+
+// refreshFolioBalance recomputes the stored folios.balance column from
+// folio_lines after every line write, so the column stays a faithful
+// summary for reporting (and never drifts from the lines it totals).
+func refreshFolioBalance(ctx context.Context, ex folioExecer, folioID string) error {
+	_, err := ex.Exec(ctx, `
+		UPDATE folios SET balance = (
+			SELECT COALESCE(SUM(CASE
+				WHEN type = 'debit' AND is_voided = FALSE THEN amount
+				WHEN type = 'credit' AND is_voided = FALSE THEN -amount
+				ELSE 0 END), 0)
+			FROM folio_lines WHERE folio_id = $1
+		), updated_at = NOW()
+		WHERE id = $1
+	`, folioID)
+	return err
+}
+
 func (h *Handler) GetFolio(w http.ResponseWriter, r *http.Request) {
 	stayID := chi.URLParam(r, "stayId")
 	propertyID := r.Header.Get("X-Property-ID")
@@ -910,9 +966,9 @@ func (h *Handler) GetFolio(w http.ResponseWriter, r *http.Request) {
 	var balance float64
 
 	err := h.db.QueryRow(context.Background(), `
-		SELECT id, folio_number, type, status, balance, currency
-		FROM folios WHERE guest_stay_id = $1 AND property_id = $2
-	`, stayID, propertyID).Scan(&folioID, &folioNumber, &folioType, &folioStatus, &balance)
+		SELECT id, folio_number, type, status, `+liveFolioBalanceSQL+`, currency
+		FROM folios f WHERE guest_stay_id = $1 AND property_id = $2
+	`, stayID, propertyID).Scan(&folioID, &folioNumber, &folioType, &folioStatus, &balance, &currency)
 
 	if err != nil {
 		response.RespondError(w, "Folio not found", http.StatusNotFound)
@@ -1036,6 +1092,10 @@ func (h *Handler) PostCharge(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		response.RespondError(w, "Failed to post charge", http.StatusInternalServerError)
+		return
+	}
+	if err := refreshFolioBalance(r.Context(), tx, folioID); err != nil {
+		response.RespondError(w, "Failed to update folio balance", http.StatusInternalServerError)
 		return
 	}
 

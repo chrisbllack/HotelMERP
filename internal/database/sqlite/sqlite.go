@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"strings"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
-	"math"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -1255,7 +1255,6 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 
-
 		// Employee contracts
 		`CREATE TABLE IF NOT EXISTS employee_contracts (
 			id TEXT PRIMARY KEY,
@@ -1820,7 +1819,7 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS expenses (id TEXT PRIMARY KEY, property_id TEXT NOT NULL, category TEXT, description TEXT, amount REAL DEFAULT 0, vendor TEXT, reference TEXT, date DATE, approved_by TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
 		`CREATE TABLE IF NOT EXISTS time_entries (id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, property_id TEXT NOT NULL, date DATE NOT NULL, clock_in TEXT, clock_out TEXT, method TEXT DEFAULT 'manual', hours_worked REAL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
 		`CREATE TABLE IF NOT EXISTS pos_order_items (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, menu_item_id TEXT NOT NULL, quantity INTEGER DEFAULT 1, unit_price REAL DEFAULT 0, total REAL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
-			// Enterprise Ops tables
+		// Enterprise Ops tables
 		`CREATE TABLE IF NOT EXISTS cash_shifts (id TEXT PRIMARY KEY, property_id TEXT NOT NULL, cashier_id TEXT, opening_cash REAL DEFAULT 0, closing_cash REAL DEFAULT 0, expected_cash REAL DEFAULT 0, variance REAL DEFAULT 0, card_total REAL DEFAULT 0, transfer_total REAL DEFAULT 0, total_sales REAL DEFAULT 0, pos_outlet TEXT, status TEXT DEFAULT 'open', notes TEXT, opened_at DATETIME, closed_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
 		`CREATE TABLE IF NOT EXISTS company_profiles (id TEXT PRIMARY KEY, property_id TEXT NOT NULL, name TEXT NOT NULL, contact_name TEXT, email TEXT, phone TEXT, address TEXT, tax_id TEXT, payment_term TEXT, credit_limit REAL DEFAULT 0, status TEXT DEFAULT 'active', created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
 		`CREATE TABLE IF NOT EXISTS travel_agent_profiles (id TEXT PRIMARY KEY, property_id TEXT NOT NULL, name TEXT NOT NULL, contact_name TEXT, email TEXT, phone TEXT, address TEXT, commission_pct REAL DEFAULT 0, payment_term TEXT, agreement_number TEXT, status TEXT DEFAULT 'active', created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
@@ -1949,12 +1948,73 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 		// Stay-value accrual column for the CRM loyalty subscriber
 		// (duplicate column tolerated on re-run by the migration loop).
 		`ALTER TABLE loyalty_members ADD COLUMN lifetime_value_kobo INTEGER NOT NULL DEFAULT 0`,
+
+		// ── Hospitality schema drift repair ──
+		// The Postgres 0006/0013 migrations define these tables and columns,
+		// but the original SQLite bootstrap omitted them. Reserve → check-in
+		// → check-out → folio therefore failed only on the default engine
+		// (e2e never reached check-in because Test04's payload 400s at
+		// validation first). Kept additive so existing installs boot.
+		`CREATE TABLE IF NOT EXISTS reservation_status_history (
+			id TEXT PRIMARY KEY,
+			reservation_id TEXT NOT NULL REFERENCES reservations(id),
+			from_status TEXT,
+			to_status TEXT NOT NULL,
+			reason TEXT,
+			changed_by TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`ALTER TABLE folios ADD COLUMN type TEXT DEFAULT 'main'`,
+		`ALTER TABLE folios ADD COLUMN closed_at DATETIME`,
+		`ALTER TABLE folio_lines ADD COLUMN posted_by TEXT`,
+		`ALTER TABLE folio_lines ADD COLUMN is_voided INTEGER DEFAULT 0`,
+		`ALTER TABLE guest_stays ADD COLUMN is_vip INTEGER DEFAULT 0`,
+		`ALTER TABLE guest_stays ADD COLUMN created_by TEXT`,
+		`ALTER TABLE reservations ADD COLUMN internal_notes TEXT`,
+		`ALTER TABLE rate_plans ADD COLUMN is_active INTEGER DEFAULT 1`,
+		`ALTER TABLE rate_plans ADD COLUMN tax_rate_id TEXT REFERENCES tax_rates(id)`,
+		// 0013 (CRM) parity: guest preferences and the denormalized loyalty
+		// mirror kept in sync by the CRM handlers/subscribers.
+		`ALTER TABLE guests ADD COLUMN loyalty_tier TEXT DEFAULT 'member'`,
+		`ALTER TABLE guests ADD COLUMN loyalty_points INTEGER DEFAULT 0`,
+		`ALTER TABLE guests ADD COLUMN preferred_room_type TEXT`,
+		`ALTER TABLE guests ADD COLUMN preferred_floor TEXT`,
+		`ALTER TABLE guests ADD COLUMN preferred_bed TEXT`,
+		`ALTER TABLE guests ADD COLUMN food_preferences TEXT`,
+		`ALTER TABLE guests ADD COLUMN allergies TEXT`,
+		`ALTER TABLE guests ADD COLUMN special_occasions TEXT`,
+		`ALTER TABLE guests ADD COLUMN blacklist_reason TEXT`,
+		`ALTER TABLE loyalty_tiers ADD COLUMN color TEXT DEFAULT '#6B7280'`,
+		`CREATE TABLE IF NOT EXISTS guest_feedback (
+			id TEXT PRIMARY KEY,
+			guest_id TEXT,
+			reservation_id TEXT,
+			overall_rating INTEGER DEFAULT 0,
+			room_rating INTEGER DEFAULT 0,
+			service_rating INTEGER DEFAULT 0,
+			food_rating INTEGER DEFAULT 0,
+			comments TEXT,
+			would_recommend INTEGER DEFAULT 0,
+			issues TEXT,
+			property_id TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		// Link seeded rate plans to the property VAT rate so check-in posts
+		// room tax. No-op on a fresh database (plans are seeded later);
+		// backfills installs created before rate_plans.tax_rate_id existed.
+		`UPDATE rate_plans SET tax_rate_id = 'tax-vat'
+			WHERE tax_rate_id IS NULL AND property_id = '00000000-0000-0000-0000-000000000001'`,
 	}
 
 	for _, m := range migrations {
 		if _, err := d.ExecContext(ctx, m); err != nil {
-			if strings.Contains(err.Error(), "duplicate column") { continue }
-			if len(m) > 80 { return fmt.Errorf("migration failed: %w\nSQL: %s", err, m[:80]) }; return fmt.Errorf("migration failed: %w\nSQL: %s", err, m)
+			if strings.Contains(err.Error(), "duplicate column") {
+				continue
+			}
+			if len(m) > 80 {
+				return fmt.Errorf("migration failed: %w\nSQL: %s", err, m[:80])
+			}
+			return fmt.Errorf("migration failed: %w\nSQL: %s", err, m)
 		}
 	}
 
@@ -1985,11 +2045,19 @@ func (d *DB) renameLegacyColumn(ctx context.Context, table, oldName, newName str
 		if err := rows.Scan(&name); err != nil {
 			return err
 		}
-		if name == oldName { hasOld = true }
-		if name == newName { hasNew = true }
+		if name == oldName {
+			hasOld = true
+		}
+		if name == newName {
+			hasNew = true
+		}
 	}
-	if err := rows.Err(); err != nil { return err }
-	if !hasOld || hasNew { return nil }
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasOld || hasNew {
+		return nil
+	}
 	if _, err := d.ExecContext(ctx,
 		`ALTER TABLE `+table+` RENAME COLUMN `+oldName+` TO `+newName); err != nil {
 		return fmt.Errorf("rename %s.%s: %w", table, oldName, err)
@@ -2024,7 +2092,7 @@ func (d *DB) SeedDemoData(ctx context.Context) error {
 	// All passwords follow pattern: <role>123 (e.g. reception123, cashier123)
 	demoUsers := []struct {
 		id, name, email, password, role string
-		permissions                    string
+		permissions                     string
 	}{
 		{
 			"usr-reception-01", "Chioma Okoro", "receptionist@infineon.com",
@@ -2187,7 +2255,7 @@ func (d *DB) SeedDemoData(ctx context.Context) error {
 	// Menu items with Nigerian/African dishes
 	menuItems := []struct {
 		catName, catCode, item, code string
-		price                       float64
+		price                        float64
 	}{
 		{"Nigerian Mains", "NG-M", "Jollof Rice & Chicken", "JOL-RIC", 4500},
 		{"Nigerian Mains", "NG-M", "Pepper Soup (Goat Meat)", "PEP-GMT", 5500},
@@ -2366,12 +2434,12 @@ func (d *DB) SeedDemoData(ctx context.Context) error {
 
 	reservations := []struct {
 		id, guestID, roomID, ratePlanID, status string
-		arrival, departure                       string
-		headlineRate                             float64
-		adults, children, roomCount              int
-		source, channel, company                 string
-		isVip                                    bool
-		specialRequests                          string
+		arrival, departure                      string
+		headlineRate                            float64
+		adults, children, roomCount             int
+		source, channel, company                string
+		isVip                                   bool
+		specialRequests                         string
 	}{
 		// CHECKED-IN guests (in-house)
 		{"res-001", "guest-Okonkwo", "room-001", "rate-corp", "checked_in", yesterday, fiveDaysLater, 34000, 2, 0, 1, "Corporate", "direct", "MTN Nigeria", true, "Late check-in preferred"},
@@ -2430,7 +2498,7 @@ func (d *DB) SeedDemoData(ctx context.Context) error {
 	stays := []struct {
 		id, reservationID, guestID, roomID string
 		checkIn, checkOut                  string
-		status                            string
+		status                             string
 	}{
 		{"stay-001", "res-001", "guest-Okonkwo", "room-001", yesterday, fiveDaysLater, "active"},
 		{"stay-002", "res-002", "guest-Nwosu", "room-002", yesterday, threeDaysLater, "active"},
@@ -2462,8 +2530,8 @@ func (d *DB) SeedDemoData(ctx context.Context) error {
 		serviceCharge := ramCharge * 0.10
 		vat := (ramCharge + serviceCharge) * 0.075
 		totalCharges := ramCharge + serviceCharge + vat
-	
-depositPaid := roomRate * 1.5
+
+		depositPaid := roomRate * 1.5
 		balance := totalCharges - depositPaid
 
 		_, _ = d.ExecContext(ctx, `
@@ -2498,18 +2566,30 @@ depositPaid := roomRate * 1.5
 		outletID, guestStayID string
 		totalAmount           float64
 		status                string
-		items                 []struct{ name string; qty int; price float64 }
+		items                 []struct {
+			name  string
+			qty   int
+			price float64
+		}
 	}{
 		{
 			"outlet-rest", "stay-001", 9500, "paid",
-			[]struct{ name string; qty int; price float64 }{
+			[]struct {
+				name  string
+				qty   int
+				price float64
+			}{
 				{"Jollof Rice & Chicken", 1, 4500},
 				{"Chapman Cocktail", 2, 2000},
 			},
 		},
 		{
 			"outlet-bar", "stay-002", 14500, "paid",
-			[]struct{ name string; qty int; price float64 }{
+			[]struct {
+				name  string
+				qty   int
+				price float64
+			}{
 				{"Suya Platter", 1, 6000},
 				{"Heineken (Bottle)", 3, 1200},
 				{"Puff Puff & Sauce", 1, 1500},
@@ -2517,7 +2597,11 @@ depositPaid := roomRate * 1.5
 		},
 		{
 			"outlet-rest", "stay-003", 12000, "paid",
-			[]struct{ name string; qty int; price float64 }{
+			[]struct {
+				name  string
+				qty   int
+				price float64
+			}{
 				{"Grilled Tilapia", 1, 7000},
 				{"Fresh Pineapple Juice", 2, 1500},
 				{"Pawpaw Ice Cream", 1, 2000},
@@ -2525,21 +2609,33 @@ depositPaid := roomRate * 1.5
 		},
 		{
 			"outlet-room", "stay-010", 53000, "paid",
-			[]struct{ name string; qty int; price float64 }{
+			[]struct {
+				name  string
+				qty   int
+				price float64
+			}{
 				{"Steak & Chips", 1, 8500},
 				{"Hennessy XO", 1, 45000},
 			},
 		},
 		{
 			"outlet-rest", "stay-005", 7500, "paid",
-			[]struct{ name string; qty int; price float64 }{
+			[]struct {
+				name  string
+				qty   int
+				price float64
+			}{
 				{"Egusi Soup & Pounded Yam", 1, 4000},
 				{"Star Larger (Bottle)", 2, 1500},
 			},
 		},
 		{
 			"outlet-room", "stay-008", 8500, "pending",
-			[]struct{ name string; qty int; price float64 }{
+			[]struct {
+				name  string
+				qty   int
+				price float64
+			}{
 				{"Full English Breakfast", 1, 5000},
 				{"Fresh Fruit Platter", 1, 2500},
 				{"Zobo Drink", 1, 1000},
@@ -2622,10 +2718,10 @@ depositPaid := roomRate * 1.5
 
 	// ââ Event Venues (Sales & Catering - Opera-style) ââ
 	venues := []struct {
-		id, name string
-		cap      int
-		hRate    float64
-		dRate    float64
+		id, name  string
+		cap       int
+		hRate     float64
+		dRate     float64
 		amenities string
 	}{
 		{"venue-palm", "Palm Ballroom", 300, 250000, 1500000, "Stage, AV system, dance floor, bar"},
@@ -2671,6 +2767,13 @@ depositPaid := roomRate * 1.5
 		('tax-luxury', '00000000-0000-0000-0000-000000000001', 'Luxury Tax', 'LUX', 5, 'percentage', 'room', 1),
 		('tax-wholding', '00000000-0000-0000-0000-000000000001', 'Withholding Tax', 'WHT', 5, 'percentage', 'corporate', 0),
 		('tax-lagos-tourism', '00000000-0000-0000-0000-000000000001', 'Lagos Tourism Development Levy', 'LTD', 1, 'percentage', 'all', 0)
+	`)
+
+	// Rate plans bill the property VAT rate on the room charge. Backfills
+	// plans seeded before rate_plans.tax_rate_id existed (existing installs).
+	_, _ = d.ExecContext(ctx, `
+		UPDATE rate_plans SET tax_rate_id = 'tax-vat'
+		WHERE tax_rate_id IS NULL AND property_id = '00000000-0000-0000-0000-000000000001'
 	`)
 
 	// ââ Payment Methods ââ
@@ -2741,7 +2844,10 @@ depositPaid := roomRate * 1.5
 	}
 
 	// ââ Shift Templates ââ
-	shifts := []struct{ id, name, code, start, end string; breakMin, overnight int }{
+	shifts := []struct {
+		id, name, code, start, end string
+		breakMin, overnight        int
+	}{
 		{"shift-morning", "Morning Shift", "AM", "06:00", "14:00", 60, 0},
 		{"shift-afternoon", "Afternoon Shift", "PM", "14:00", "22:00", 60, 0},
 		{"shift-night", "Night Shift", "NT", "22:00", "06:00", 60, 1},
@@ -2754,7 +2860,10 @@ depositPaid := roomRate * 1.5
 	}
 
 	// ââ Leave Types ââ
-	leaveTypes := []struct{ id, name string; days int }{
+	leaveTypes := []struct {
+		id, name string
+		days     int
+	}{
 		{"lt-annual", "Annual Leave", 21},
 		{"lt-sick", "Sick Leave", 12},
 		{"lt-maternity", "Maternity Leave", 90},
@@ -2781,7 +2890,11 @@ depositPaid := roomRate * 1.5
 	}
 
 	// ââ Training Courses ââ
-	courses := []struct{ id, name, cat string; hours float64; mandatory int }{
+	courses := []struct {
+		id, name, cat string
+		hours         float64
+		mandatory     int
+	}{
 		{"tc-fire", "Fire Safety & Emergency Response", "Safety", 8, 1},
 		{"tc-food", "Food Safety & Hygiene (HACCP)", "F&B", 16, 1},
 		{"tc-guest", "Guest Service Excellence", "Hospitality", 8, 1},
@@ -2842,9 +2955,9 @@ depositPaid := roomRate * 1.5
 		for i := 1; i <= 15; i++ {
 			empID := fmt.Sprintf("emp-EMP-%03d", i)
 			attID := fmt.Sprintf("att-%s-%03d", date, i)
-			clockInH, clockInM := 7+((i*3)%3), ((i*17)%50)
+			clockInH, clockInM := 7+((i*3)%3), ((i * 17) % 50)
 			clockIn := fmt.Sprintf("%s %02d:%02d:00", date, clockInH, clockInM)
-			clockOut := fmt.Sprintf("%s %d:%02d:00", date, 16+((i*2)%3), ((i*13)%55))
+			clockOut := fmt.Sprintf("%s %d:%02d:00", date, 16+((i*2)%3), ((i * 13) % 55))
 			var status string
 			if isWeekend && i > 10 {
 				status = "absent"
@@ -2977,11 +3090,11 @@ depositPaid := roomRate * 1.5
 	// Booking.com bookings (15% commission)
 	otaBookings := []struct {
 		id, channelID, channelCode, otaRef, guestName, guestEmail string
-		roomTypeID, checkIn, checkOut string
-		nights int
-		ratePerNight, totalAmount, commission, netAmount float64
-		status, paymentStatus string
-		numGuests int
+		roomTypeID, checkIn, checkOut                             string
+		nights                                                    int
+		ratePerNight, totalAmount, commission, netAmount          float64
+		status, paymentStatus                                     string
+		numGuests                                                 int
 	}{
 		// Booking.com (15% commission)
 		{"chb-001", "ch-bkng", "bkng", "BK-2847391", "James Mitchell", "james.m@gmail.com", "rt-standard", "2026-09-01", "2026-09-04", 3, 25000, 75000, 11250, 63750, "confirmed", "paid", 2},
@@ -3024,7 +3137,10 @@ depositPaid := roomRate * 1.5
 	_, _ = d.ExecContext(ctx, `UPDATE channels SET total_bookings=5, total_revenue=450000 WHERE id='ch-airb'`)
 
 	// ── Restaurant Tables (16 tables: Main, Terrace, VIP, Private) ──
-	rTables := []struct{ id, number, section string; capacity int }{
+	rTables := []struct {
+		id, number, section string
+		capacity            int
+	}{
 		{"rt-01", "1", "Main", 4}, {"rt-02", "2", "Main", 4}, {"rt-03", "3", "Main", 6},
 		{"rt-04", "4", "Main", 2}, {"rt-05", "5", "Main", 4}, {"rt-06", "6", "Main", 8},
 		{"rt-07", "7", "Main", 4}, {"rt-08", "8", "Main", 4}, {"rt-09", "9", "Terrace", 4},
@@ -3036,7 +3152,12 @@ depositPaid := roomRate * 1.5
 	}
 
 	// ── Restaurant Menu (Nigerian & International) ──
-	rMenu := []struct{ name, cat, desc string; price, cost float64; prep int; tags string }{
+	rMenu := []struct {
+		name, cat, desc string
+		price, cost     float64
+		prep            int
+		tags            string
+	}{
 		{"Jollof Rice", "main", "Classic Nigerian jollof with grilled chicken", 4500, 1200, 20, "spicy"},
 		{"Fried Rice", "main", "Nigerian fried rice with mixed vegetables", 4500, 1100, 18, ""},
 		{"Ofada Rice", "main", "Local ofada rice with ayamase sauce", 5500, 1800, 25, "spicy"},
@@ -3068,7 +3189,11 @@ depositPaid := roomRate * 1.5
 	}
 
 	// ── Restaurant Ingredients ──
-	ingredients := []struct{ name, cat, unit string; stock, minStock, cost float64; supplier string }{
+	ingredients := []struct {
+		name, cat, unit       string
+		stock, minStock, cost float64
+		supplier              string
+	}{
 		{"Basmati Rice", "grains", "kg", 50, 10, 1200, "Lagos Food Co"},
 		{"Chicken (whole)", "protein", "kg", 30, 8, 3500, "Chicken Republic Supply"},
 		{"Goat Meat", "protein", "kg", 15, 5, 5500, "Mile 12 Market"},
@@ -3092,43 +3217,76 @@ depositPaid := roomRate * 1.5
 	}
 
 	// ── Restaurant Orders (8 demo orders across today) ──
-	rOrders := []struct{ id, num, tableID, typ, status, staff string; items []struct{ name, cat string; qty, price float64 }; guest string }{
+	rOrders := []struct {
+		id, num, tableID, typ, status, staff string
+		items                                []struct {
+			name, cat  string
+			qty, price float64
+		}
+		guest string
+	}{
 		{"ro-001", "ORD-120801", "rt-03", "dine_in", "completed", "Waiter Chidi",
-			[]struct{ name, cat string; qty, price float64 }{
+			[]struct {
+				name, cat  string
+				qty, price float64
+			}{
 				{"Jollof Rice", "main", 2, 4500}, {"Star Lager", "drink", 2, 1000}, {"Pepper Soup", "starter", 1, 3000}},
 			"Mr. Obi"},
 		{"ro-002", "ORD-120901", "rt-06", "dine_in", "preparing", "Waiter Amara",
-			[]struct{ name, cat string; qty, price float64 }{
+			[]struct {
+				name, cat  string
+				qty, price float64
+			}{
 				{"Grilled Tilapia", "main", 1, 7500}, {"Fried Rice", "main", 1, 4500}, {"Guinness Stout", "drink", 3, 1200}, {"Pancakes", "dessert", 2, 2000}},
 			"Mrs. Adeyemi"},
 		{"ro-003", "ORD-120902", "rt-10", "dine_in", "new", "Waiter Emeka",
-			[]struct{ name, cat string; qty, price float64 }{
+			[]struct {
+				name, cat  string
+				qty, price float64
+			}{
 				{"Egusi Soup & Pounded Yam", "main", 2, 5000}, {"Chapman", "drink", 2, 1500}},
 			"Dr. Okoro"},
 		{"ro-004", "ORD-120903", "rt-01", "dine_in", "served", "Waiter Chidi",
-			[]struct{ name, cat string; qty, price float64 }{
+			[]struct {
+				name, cat  string
+				qty, price float64
+			}{
 				{"Chicken Shawarma", "main", 3, 3000}, {"Coca-Cola", "drink", 3, 500}},
 			"Team from MTN"},
 		{"ro-005", "ORD-120904", "", "delivery", "new", "Kitchen",
-			[]struct{ name, cat string; qty, price float64 }{
+			[]struct {
+				name, cat  string
+				qty, price float64
+			}{
 				{"Jollof Rice", "main", 5, 4500}, {"Suya Skewers", "main", 3, 3500}},
 			"Lekki Office"},
 		{"ro-006", "ORD-120905", "rt-13", "dine_in", "preparing", "Waiter Amara",
-			[]struct{ name, cat string; qty, price float64 }{
+			[]struct {
+				name, cat  string
+				qty, price float64
+			}{
 				{"Banga Soup & Starch", "main", 2, 6000}, {"Suya Skewers", "main", 2, 3500}, {"Star Lager", "drink", 4, 1000}, {"Chin Chin Sundae", "dessert", 2, 3000}},
 			"Chief Okafor"},
 		{"ro-007", "ORD-120906", "rt-04", "dine_in", "completed", "Waiter Emeka",
-			[]struct{ name, cat string; qty, price float64 }{
+			[]struct {
+				name, cat  string
+				qty, price float64
+			}{
 				{"Spring Rolls", "starter", 1, 2000}, {"Café Latte", "drink", 2, 1200}},
 			"Visitor"},
 		{"ro-008", "ORD-120907", "", "takeout", "new", "Kitchen",
-			[]struct{ name, cat string; qty, price float64 }{
+			[]struct {
+				name, cat  string
+				qty, price float64
+			}{
 				{"Ofada Rice", "main", 2, 5500}, {"Gizdodo", "starter", 1, 3500}},
 			"Pickup - Mr. Tunde"},
 	}
 	for _, o := range rOrders {
 		sub := 0.0
-		for _, it := range o.items { sub += it.qty * it.price }
+		for _, it := range o.items {
+			sub += it.qty * it.price
+		}
 		tax := math.Round(sub*0.075*100) / 100
 		total := sub + tax
 		_, _ = d.ExecContext(ctx, `INSERT OR IGNORE INTO restaurant_orders (id, property_id, order_number, table_id, type, status, staff_name, guest_name, subtotal, tax_amount, total, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
@@ -3141,7 +3299,11 @@ depositPaid := roomRate * 1.5
 	}
 
 	// ── Restaurant Guests ──
-	rGuests := []struct{ id, name, phone, tier, favDish, dietary string; visits int; spend float64 }{
+	rGuests := []struct {
+		id, name, phone, tier, favDish, dietary string
+		visits                                  int
+		spend                                   float64
+	}{
 		{"rg-001", "Chief Okafor", "+234-803-123-4567", "vip", "Banga Soup", "Low salt", 28, 425000},
 		{"rg-002", "Mrs. Adeyemi", "+234-805-234-5678", "gold", "Grilled Tilapia", "", 15, 187000},
 		{"rg-003", "Mr. Obi", "+234-802-345-6789", "silver", "Jollof Rice", "", 8, 65000},
