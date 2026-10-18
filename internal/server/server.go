@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"infineon/internal/auth"
 	"infineon/internal/config"
@@ -70,9 +71,13 @@ func New(cfg *config.Config, db database.Pool, staticFiles fs.FS) http.Handler {
 		// Health
 		r.Get("/health", h.Health)
 
-		// Public
-		r.Post("/auth/login", h.Login)
-		r.Post("/auth/register", h.Register)
+		// Public (rate-limited credential endpoints)
+		loginLimiter := middleware.NewIPRateLimiter(10, time.Minute)
+		limited := func(next http.Handler) http.Handler {
+			return middleware.LoginRateLimit(loginLimiter, next)
+		}
+		r.With(limited).Post("/auth/login", h.Login)
+		r.With(limited).Post("/auth/register", h.Register)
 		r.Post("/booking/search", h.SearchAvailability)
 		r.Post("/booking/create", h.CreateBooking)
 		r.Post("/ai/chat", h.ChatWithAI)
@@ -89,6 +94,10 @@ func New(cfg *config.Config, db database.Pool, staticFiles fs.FS) http.Handler {
 			if cfg.Mode == "demo" {
 				r.Use(middleware.DemoPropertyID("00000000-0000-0000-0000-000000000001"))
 			}
+			// Pin tenancy to the JWT (header verified + injected), then
+			// enforce module-level permission boundaries on every route.
+			r.Use(middleware.PropertyScope())
+			r.Use(middleware.ModuleRBAC())
 
 			// Users
 			r.Route("/users", func(r chi.Router) {

@@ -296,7 +296,7 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 			payment_method TEXT,
 			deposit_amount REAL DEFAULT 0,
 			deposit_paid REAL DEFAULT 0,
-			total_estimate REAL DEFAULT 0,
+			total_estimated REAL DEFAULT 0,
 			currency TEXT DEFAULT 'NGN',
 			exchange_rate REAL DEFAULT 1,
 			is_vip INTEGER DEFAULT 0,
@@ -1904,7 +1904,43 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 		}
 	}
 
+	// Engine-drift repair: databases created before the schema audit carry
+	// reservations.total_estimate while the Postgres migrations, handlers and
+	// JSON contract all use total_estimated. Rename in place when the legacy
+	// column is present so existing installs keep booting.
+	if err := d.renameLegacyColumn(ctx, "reservations", "total_estimate", "total_estimated"); err != nil {
+		return fmt.Errorf("drift repair failed: %w", err)
+	}
+
 	log.Printf("[sqlite] All %d migrations applied successfully", len(migrations))
+	return nil
+}
+
+// renameLegacyColumn renames oldName to newName on table when the legacy
+// column exists and the replacement does not yet. It is a no-op on fresh
+// databases, making it safe to call on every boot.
+func (d *DB) renameLegacyColumn(ctx context.Context, table, oldName, newName string) error {
+	rows, err := d.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return fmt.Errorf("pragma %s: %w", table, err)
+	}
+	defer rows.Close()
+	var hasOld, hasNew bool
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == oldName { hasOld = true }
+		if name == newName { hasNew = true }
+	}
+	if err := rows.Err(); err != nil { return err }
+	if !hasOld || hasNew { return nil }
+	if _, err := d.ExecContext(ctx,
+		`ALTER TABLE `+table+` RENAME COLUMN `+oldName+` TO `+newName); err != nil {
+		return fmt.Errorf("rename %s.%s: %w", table, oldName, err)
+	}
+	log.Printf("[sqlite] Drift repair: %s.%s renamed to %s", table, oldName, newName)
 	return nil
 }
 
@@ -2327,7 +2363,7 @@ func (d *DB) SeedDemoData(ctx context.Context) error {
 		_, _ = d.ExecContext(ctx, `
 			INSERT OR IGNORE INTO reservations (id, property_id, confirmation_number, guest_id, rate_plan_id, room_id, status,
 				arrival_date, departure_date, nights, adults, children, room_count,
-				source, is_vip, special_requests, deposit_amount, deposit_paid, total_estimate)
+				source, is_vip, special_requests, deposit_amount, deposit_paid, total_estimated)
 			VALUES (?, '00000000-0000-0000-0000-000000000001', ?, ?, ?, ?, ?,
 				?, ?, ?, ?, ?, 1,
 				?, ?, ?, ?, ?, ?)
