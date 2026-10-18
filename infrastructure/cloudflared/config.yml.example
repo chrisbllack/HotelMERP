@@ -1,0 +1,10 @@
+# Operator-managed Cloudflare Tunnel configuration.
+# Replace the placeholders after running `cloudflared tunnel login` and creating
+# a tunnel. Do not commit the credential JSON or a tunnel token.
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  - hostname: hotel.example.com
+    service: http://127.0.0.1:8080
+  - service: http_status:404

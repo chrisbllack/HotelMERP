@@ -15,5 +15,5 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 		response.RespondError(w, "Database unreachable", http.StatusServiceUnavailable)
 		return
 	}
-	response.RespondSuccess(w, map[string]interface{}{"status":"healthy","version":"0.1.0","database":"connected"}, "System operational")
+	response.RespondSuccess(w, map[string]interface{}{"status": "healthy", "version": "0.1.0", "database": "connected"}, "System operational")
 }
