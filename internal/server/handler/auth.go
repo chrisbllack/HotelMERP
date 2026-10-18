@@ -11,12 +11,12 @@ import (
 )
 
 type AuthHandler struct {
-	jwtSvc       *auth.JWTSvc
+	jwtSvc       *auth.JWTService
 	sessionStore *auth.SessionStore
 }
 
 func NewAuthHandler(
-	jwtSvc *auth.JWTSvc,
+	jwtSvc *auth.JWTService,
 	sessionStore *auth.SessionStore,
 ) *AuthHandler {
 	return &AuthHandler{
@@ -88,8 +88,8 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
-	claims, ok := auth.ClaimsFromContext(r.Context())
-	if !ok || claims == nil {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
 		api.WriteError(
 			w,
 			r,

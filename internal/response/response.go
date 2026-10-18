@@ -12,9 +12,11 @@ import (
 type APIResponse struct {
 	Success   bool        `json:"success"`
 	Message   string      `json:"message"`
+	Code      string      `json:"code,omitempty"`
 	Data      interface{} `json:"data,omitempty"`
 	Meta      Meta        `json:"meta,omitempty"`
 	Errors    []string    `json:"errors,omitempty"`
+	Details   interface{} `json:"details,omitempty"`
 	Timestamp string      `json:"timestamp"`
 }
 

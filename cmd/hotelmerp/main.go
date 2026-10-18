@@ -1,52 +1,87 @@
 package main
 
 import (
-    "log"
-    "net/http"
-    "os"
-    
-    "github.com/go-chi/chi/v5"
-    "github.com/go-chi/chi/v5/middleware"
-    
-    "hotelmerp/internal/platform/auth"
-    "hotelmerp/internal/distribution"
-    "hotelmerp/internal/lodging"
-    "hotelmerp/internal/finance"
-    "hotelmerp/internal/mobile"
+	"context"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+
+	"infineon/internal/config"
+	"infineon/internal/database"
+	"infineon/internal/database/sqlite"
+	"infineon/internal/server"
 )
 
+// HotelMERP on-premise server entrypoint.
+//
+// Storage backends:
+//   - sqlite (default): embedded single-file database — zero external
+//     dependencies; schema + demo seed run automatically on first boot
+//   - postgres: set DATABASE_URL=postgres://... — migrations/ and seeds/
+//     are applied on boot
 func main() {
-    // Initialize core modules
-    auth.Init()
-    
-    // Setup router
-    r := chi.NewRouter()
-    
-    // Middleware
-    r.Use(middleware.Logger)
-    r.Use(middleware.Recoverer)
-    
-    // API routes
-    r.Route("/api/v1", func(r chi.Router) {
-        // Distribution & Commerce - OTA integration
-        distribution.Routes(r)
-        
-        // Lodging & Guest Operations
-        lodging.Routes(r)
-        
-        // Finance & Accounting
-        finance.Routes(r)
-        
-        // Mobile App API
-        mobile.Routes(r)
-    })
-    
-    // Start server
-    port := os.Getenv("PORT")
-    if port == "" {
-        port = "8080"
-    }
-    
-    log.Printf("Server starting on port %s", port)
-    log.Fatal(http.ListenAndServe(":"+port, r))
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("[main] config: %v", err)
+	}
+
+	ctx := context.Background()
+	pool, err := openStorage(cfg, ctx)
+	if err != nil {
+		log.Fatalf("[main] storage: %v", err)
+	}
+
+	router := server.New(cfg, pool, nil)
+
+	addr := ":" + cfg.Port
+	log.Printf("HotelMERP listening on http://localhost%s (mode=%s, payment=%s)", addr, cfg.Mode, cfg.PaymentProvider)
+	if err := http.ListenAndServe(addr, router); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// openStorage selects the storage backend. SQLite is the default so the
+// system runs on-premise with no external database service.
+func openStorage(cfg *config.Config, ctx context.Context) (database.Pool, error) {
+	// Postgres only when DATABASE_URL explicitly points at postgres.
+	if strings.HasPrefix(os.Getenv("DATABASE_URL"), "postgres") {
+		pg, err := database.Connect(cfg.DatabaseURL)
+		if err != nil {
+			return nil, err
+		}
+		if err := database.Migrate(pg); err != nil {
+			return nil, err
+		}
+		if err := database.Seed(pg); err != nil {
+			return nil, err
+		}
+		return database.NewPGXPool(pg), nil
+	}
+
+	dbPath := os.Getenv("INFINEON_DB_PATH")
+	if dbPath == "" {
+		dbPath = "data/hotelmerp.db"
+	}
+
+	fresh := false
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		fresh = true
+	}
+
+	db, err := sqlite.New(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.RunMigrations(ctx); err != nil {
+		return nil, err
+	}
+	if fresh {
+		if err := db.SeedDemoData(ctx); err != nil {
+			return nil, err
+		}
+		log.Printf("[main] seeded demo data into %s", dbPath)
+	}
+	log.Printf("[main] SQLite storage ready at %s", dbPath)
+	return database.NewSQLitePool(db.DB), nil
 }

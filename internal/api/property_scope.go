@@ -25,8 +25,8 @@ func RequirePropertyHeader(next http.Handler) http.Handler {
 			return
 		}
 
-		claims, ok := auth.ClaimsFromContext(r.Context())
-		if !ok || claims == nil {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
 			WriteError(
 				w,
 				r,

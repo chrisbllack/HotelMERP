@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"infineon/internal/auth"
+	"infineon/internal/database"
 	"infineon/internal/server/handler"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,7 +25,11 @@ type TestServer struct {
 func SetupTestHandler(t *testing.T, db *pgxpool.Pool) *TestServer {
 	t.Helper()
 	jwt := auth.NewJWTService([]byte("test-secret-for-unit-tests-2024"))
-	h := handler.New(db, jwt)
+	var pool database.Pool
+	if db != nil {
+		pool = database.NewPGXPool(db)
+	}
+	h := handler.New(pool, jwt)
 	return &TestServer{Handler: h}
 }
 

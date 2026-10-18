@@ -2,13 +2,10 @@ package auth
 
 import (
     "context"
-    "crypto/rand"
-    "encoding/hex"
     "net/http"
     "time"
-    
+
     "github.com/golang-jwt/jwt/v5"
-    "golang.org/x/crypto/bcrypt"
 )
 
 // User represents a system user

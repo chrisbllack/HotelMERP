@@ -4,7 +4,7 @@ import (
     "encoding/json"
     "net/http"
     
-    "hotelmerp/internal/lodging/reservations"
+    "github.com/go-chi/chi/v5"
 )
 
 // GuestProfile represents guest information for mobile app

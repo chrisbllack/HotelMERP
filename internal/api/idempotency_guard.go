@@ -27,7 +27,7 @@ type IdempotencyRecord struct {
 	Body        []byte
 }
 
-type IdempotencyStore interface {
+type IdempotencyRecordStore interface {
 	Find(
 		ctx context.Context,
 		propertyID uuid.UUID,
@@ -75,7 +75,7 @@ func ReadBody(r *http.Request) ([]byte, error) {
 	return body, nil
 }
 
-func RequireIdempotencyKey(r *http.Request) (string, error) {
+func IdempotencyKeyFromRequest(r *http.Request) (string, error) {
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if key == "" {
 		return "", ErrMissingIdempotencyKey
@@ -107,7 +107,7 @@ func DecodeJSON[T any](r *http.Request, target *T) ([]byte, error) {
 
 func BeginIdempotentRequest(
 	ctx context.Context,
-	store IdempotencyStore,
+	store IdempotencyRecordStore,
 	propertyID uuid.UUID,
 	actorID uuid.UUID,
 	key string,
@@ -155,7 +155,7 @@ func BeginIdempotentRequest(
 
 func CompleteIdempotentRequest(
 	ctx context.Context,
-	store IdempotencyStore,
+	store IdempotencyRecordStore,
 	propertyID uuid.UUID,
 	actorID uuid.UUID,
 	key string,

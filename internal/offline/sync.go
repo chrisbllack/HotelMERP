@@ -318,13 +318,13 @@ func (se *SyncEngine) incrementRetry(ctx context.Context, eventID, errMsg string
 func (se *SyncEngine) GetStatus(ctx context.Context, deviceID string) *SyncStatus {
 	status := &SyncStatus{Online: se.online, DeviceID: deviceID}
 
-	se.db.QueryRow(ctx, `SELECT COUNT(*) FROM sync_queue WHERE status='pending'`).Scan(&status.PendingCount)
-	se.db.QueryRow(ctx, `SELECT COUNT(*) FROM sync_queue WHERE status='syncing'`).Scan(&status.SyncingCount)
-	se.db.QueryRow(ctx, `SELECT COUNT(*) FROM sync_queue WHERE status='synced'`).Scan(&status.SyncedCount)
-	se.db.QueryRow(ctx, `SELECT COUNT(*) FROM sync_queue WHERE status='failed'`).Scan(&status.FailedCount)
-	se.db.QueryRow(ctx, `SELECT COUNT(*) FROM sync_conflicts WHERE resolution IS NULL`).Scan(&status.ConflictCount)
-	se.db.QueryRow(ctx, `SELECT COALESCE(MAX(synced_at),'1970-01-01') FROM sync_queue WHERE status='synced'`).Scan(&status.LastSyncAt)
-	se.db.QueryRow(ctx, `SELECT COALESCE(SUM(LENGTH(payload)),0) FROM sync_queue WHERE status='pending'`).Scan(&status.QueueSize)
+	se.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sync_queue WHERE status='pending'`).Scan(&status.PendingCount)
+	se.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sync_queue WHERE status='syncing'`).Scan(&status.SyncingCount)
+	se.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sync_queue WHERE status='synced'`).Scan(&status.SyncedCount)
+	se.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sync_queue WHERE status='failed'`).Scan(&status.FailedCount)
+	se.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sync_conflicts WHERE resolution IS NULL`).Scan(&status.ConflictCount)
+	se.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(synced_at),'1970-01-01') FROM sync_queue WHERE status='synced'`).Scan(&status.LastSyncAt)
+	se.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(LENGTH(payload)),0) FROM sync_queue WHERE status='pending'`).Scan(&status.QueueSize)
 
 	return status
 }

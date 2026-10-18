@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-
-	"github.com/google/uuid"
 )
 
 // ═══════════════════════════════════════════════════════════════
@@ -315,7 +313,7 @@ func (te *TaxEngine) GetTaxRemittanceSummary(ctx context.Context, propertyID, st
 	var taxes []map[string]interface{}
 	for _, rule := range rules {
 		var collected float64
-		te.db.QueryRow(ctx,
+		te.db.QueryRowContext(ctx,
 			`SELECT COALESCE(SUM(amount), 0) FROM tax_calculations tc
 			WHERE tc.property_id=? AND tc.created_at BETWEEN ? AND ?
 			AND JSON_EXTRACT(tc.taxes, '$[*].code') LIKE ?`,

@@ -4,7 +4,7 @@ import (
     "encoding/json"
     "net/http"
     
-    "hotelmerp/internal/lodging/rooms"
+    "github.com/go-chi/chi/v5"
 )
 
 // StaffRoomStatus represents room status for staff app

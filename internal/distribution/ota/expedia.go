@@ -1,7 +1,6 @@
 package ota
 
 import (
-    "encoding/xml"
     "fmt"
     "net/http"
     "time"

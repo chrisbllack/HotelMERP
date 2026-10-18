@@ -228,7 +228,7 @@ func (ce *CommunicationsEngine) seedTemplates() {
 func (ce *CommunicationsEngine) SendTemplate(ctx context.Context, propertyID, templateID, guestPhone string, variables map[string]string) (*SMSResponse, error) {
 	// Get template
 	var body, channel string
-	err := ce.db.QueryRow(ctx, `SELECT body, channel FROM message_templates WHERE id=? AND enabled=1`, templateID).Scan(&body, &channel)
+	err := ce.db.QueryRowContext(ctx, `SELECT body, channel FROM message_templates WHERE id=? AND enabled=1`, templateID).Scan(&body, &channel)
 	if err != nil {
 		return nil, fmt.Errorf("template not found: %s", templateID)
 	}
@@ -269,7 +269,7 @@ func (ce *CommunicationsEngine) SendTemplate(ctx context.Context, propertyID, te
 }
 
 func (ce *CommunicationsEngine) recordMessage(ctx context.Context, propertyID, channel, direction, to, body, providerMsgID, templateID string) {
-	_, _ = ce.db.Exec(ctx,
+	_, _ = ce.db.ExecContext(ctx,
 		`INSERT INTO messages (id, property_id, channel, direction, to_number, body, status, provider, provider_message_id, template_id, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, 'sent', 'mock', ?, ?, ?)`,
 		uuid.New().String(), propertyID, channel, direction, to, body, providerMsgID, templateID, time.Now().UTC())
