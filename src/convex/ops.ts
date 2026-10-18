@@ -7,8 +7,9 @@ import { v } from "convex/values";
 import { ConvexError } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { computeAvailability } from "./lib";
+import { computeAvailability, todayPropertyLocal } from "./lib";
 import type { AvailabilityRow } from "./lib";
+import { emit, EVENTS } from "./events";
 
 const SEED_PK = "grand-palm-lagos";
 
@@ -101,6 +102,7 @@ export const recordManualPayment = mutation({
     const res = await ctx.db.get(reservationId);
     if (!res) throw new ConvexError("Reservation not found");
     const now = Date.now();
+    const reference = `MAN-${res.code}-${now}`;
     const paidKobo = Math.min(res.totalKobo, res.paidKobo + amountKobo);
     await ctx.db.patch(reservationId, {
       paidKobo,
@@ -113,12 +115,29 @@ export const recordManualPayment = mutation({
       method,
       amountKobo,
       currency: "NGN",
-      reference: `MAN-${res.code}-${now}`,
+      reference,
       gateway: "manual",
       status: "success",
       channelResponse: "Recorded at front desk",
       createdAt: now,
       paidAt: now,
+    });
+    // GL posting flows through the payment.captured contract (single rule).
+    const property = await ctx.db.get(res.propertyId);
+    await emit(ctx, {
+      propertyId: res.propertyId,
+      type: EVENTS.paymentCaptured,
+      source: "frontdesk",
+      entityId: res.code,
+      payload: {
+        propertyId: res.propertyId,
+        date: todayPropertyLocal((property as { timezone: string } | null)?.timezone ?? "Africa/Lagos"),
+        method,
+        amountKobo,
+        reference,
+        description: `Front-desk payment ${res.code}`,
+      },
+      by: "front desk",
     });
     await ctx.db.insert("auditLogs", {
       propertyId: res.propertyId,

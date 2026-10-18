@@ -67,10 +67,14 @@ export async function emit(ctx: MutationCtx, input: EmitInput): Promise<Id<"doma
 type Subscriber = (ctx: unknown, args: { payload: unknown }) => Promise<unknown>;
 
 const SUBSCRIBERS: Record<string, Subscriber[]> = {
+  // M-FIN: every captured payment posts Dr cash/bank, Cr guest ledger.
+  [EVENTS.paymentCaptured]: [internal.ledger.onPaymentCaptured as unknown as Subscriber],
   // M-LOD → M-CRM: post-stay loyalty accrual + lifetime value.
   [EVENTS.reservationCheckedOut]: [internal.crm.onStayCompleted as unknown as Subscriber],
   // M-LOD → M-CRM: welcome points for new guests.
   [EVENTS.reservationCheckedIn]: [internal.crm.onGuestCheckedIn as unknown as Subscriber],
+  // M-INV → M-PRC: reorder check after each stock movement.
+  [EVENTS.stockMovement]: [internal.inventory.onStockMovement as unknown as Subscriber],
 };
 
 export const dispatch = internalMutation({

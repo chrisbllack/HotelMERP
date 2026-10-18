@@ -16,6 +16,8 @@ import { ConvexError } from "convex/values";
 import { action, internalAction, internalMutation, type MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
+import { emit, EVENTS } from "./events";
+import { todayPropertyLocal } from "./lib";
 
 const PAYSTACK_INIT_URL = "https://api.paystack.co/transaction/initialize";
 const PAYSTACK_VERIFY_URL = (ref: string) => `https://api.paystack.co/transaction/verify/${encodeURIComponent(ref)}`;
@@ -146,7 +148,9 @@ export const applyDemoPayment = internalMutation({
   handler: async (ctx, { code, amountKobo }): Promise<void> => {
     const res = await reservationByCode(ctx, code);
     if (!res) throw new ConvexError("Booking not found");
+    const property = await propertyById(ctx, res.propertyId);
     const now = Date.now();
+    const reference = `DEMO-${res.code}-${now}`;
     const paidKobo = Math.min(res.totalKobo, res.paidKobo + amountKobo);
     await ctx.db.patch(res._id, {
       paidKobo,
@@ -159,12 +163,28 @@ export const applyDemoPayment = internalMutation({
       method: "online",
       amountKobo,
       currency: "NGN",
-      reference: `DEMO-${res.code}-${now}`,
+      reference,
       gateway: "internal",
       status: "success",
       channelResponse: "Demo checkout — pay at front desk mode",
       createdAt: now,
       paidAt: now,
+    });
+    // Contract: every captured payment posts through M-FIN (outbox → GL).
+    await emit(ctx, {
+      propertyId: res.propertyId,
+      type: EVENTS.paymentCaptured,
+      source: "website",
+      entityId: res.code,
+      payload: {
+        propertyId: res.propertyId,
+        date: todayPropertyLocal(property.timezone),
+        method: "online",
+        amountKobo,
+        reference,
+        description: `Website deposit ${res.code}`,
+      },
+      by: "website checkout",
     });
     await ctx.db.insert("auditLogs", {
       propertyId: res.propertyId,
@@ -223,6 +243,22 @@ export const recordGatewaySuccess = internalMutation({
         status: res.status === "pending" ? "confirmed" : res.status,
       });
     }
+    const property = await propertyById(ctx, pay.propertyId);
+    await emit(ctx, {
+      propertyId: pay.propertyId,
+      type: EVENTS.paymentCaptured,
+      source: "website",
+      entityId: reference,
+      payload: {
+        propertyId: pay.propertyId,
+        date: todayPropertyLocal(property.timezone),
+        method: "online",
+        amountKobo: amount,
+        reference,
+        description: `Gateway capture ${reference}`,
+      },
+      by: "payment gateway",
+    });
     await ctx.db.insert("auditLogs", {
       propertyId: pay.propertyId,
       actorName: "payment gateway",
@@ -238,6 +274,10 @@ export const recordGatewaySuccess = internalMutation({
 });
 
 // ── helpers ──────────────────────────────────────────────────────────────
+
+async function propertyById(ctx: MutationCtx, propertyId: Doc<"properties">["_id"]): Promise<Doc<"properties">> {
+  return (await ctx.db.get(propertyId)) as Doc<"properties">;
+}
 
 async function reservationByCode(ctx: MutationCtx, code: string): Promise<Doc<"reservations"> | null> {
   const property = await ctx.db
